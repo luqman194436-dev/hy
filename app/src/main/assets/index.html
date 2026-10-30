@@ -48,8 +48,11 @@ let H = 640;
 const rnd = (a, b) => a + Math.random() * (b - a);
 
 // ==========================================
-// TUNING CONSTANTS (Scale, Speed, Physics)
+// TUNING CONSTANTS (Scale, Speed, Physics, SFX)
 // ==========================================
+const SFX_VOLUME = 0.8;
+const PUFF_INTERVAL = 0.2;
+
 const SPEED_MULTIPLIER = 1.0;
 const VERTICAL_RESPONSE = 1.0;
 const SHOW_DEBUG = false;
@@ -79,37 +82,57 @@ const CAR_DRAW_W = 142;
 let CAR_DRAW_H = 48;
 let CAR_REST_Y = ROAD_TOP + 3;
 
+// Tunnel vertical positioning constants
+const TUNNEL_CENTER_MIN = 0.36;
+const TUNNEL_CENTER_MAX = 0.60;
+const TUNNEL_START_CENTER = 0.50;
+
+// Wheel configuration constants (fractions of trimmed car image)
+const WHEEL_REAR_X = 0.18;
+const WHEEL_FRONT_X = 0.817;
+const WHEEL_Y = 0.71;            // from the top of the image
+const WHEEL_RADIUS = 0.091;      // of the image width
+const WHEEL_SPIN_RADIUS = 0.70 * WHEEL_RADIUS; // Perfectly fills the rim opening inside tire
+const SHOW_WHEEL_DEBUG = false;  // When true, draw thin green circles at wheel positions
+
 const lerp = (a, b, t) => a + (b - a) * t;
 
 // ==========================================
 // DIFFICULTY PROGRESSION TUNING CONSTANTS
 // ==========================================
 const BASE_SCROLL_SPEED_RATIO = 0.30;   // Level 1 scroll speed = 0.30 * W
-const SCROLL_SPEED_GROWTH = 0.45;       // Scroll speed multiplier = 1 + 0.45 * f
-const GAP_LEVEL_1_RATIO = 4.2;          // Level 1 gap = 4.2 * carH
-const GAP_MAX_DIFFICULTY_RATIO = 2.4;   // Max difficulty gap = 2.4 * carH (absolute minimum)
+const SCROLL_SPEED_GROWTH = 0.25;       // Speed multiplier = 1 + 0.25 * f
+const GAP_LEVEL_1_RATIO = 4.4;          // Level 1 gap = 4.4 * carH
+const GAP_MAX_DIFFICULTY_RATIO = 3.0;   // Max difficulty gap = 3.0 * carH (never below 3.0 * carH)
 const STEP_MIN_RATIO = 0.15;            // Step ratio at level 1 (15% of max fair step)
-const STEP_MAX_RATIO = 0.60;            // Step ratio at high levels (60% of max fair step)
+const STEP_MAX_RATIO = 0.50;            // Step ratio at high levels
 const SEG_LEN_LEVEL_1_RATIO = 1.30;     // Segment length ratio at level 1 (1.3 * base)
-const SEG_LEN_MAX_RATIO = 0.85;         // Segment length ratio at high difficulty (0.85 * base)
-const BASE_SEGMENT_LEN = 280;           // Base segment length in pixels
-const INTRA_LEVEL_GROWTH = 0.15;        // Difficulty rises by 15% inside each level
-const INTRA_LEVEL_EASY_FRACTION = 0.15; // First 15% of each level starts easier
-const SQUEEZE_GAP_RATIO = 2.8;          // Squeeze section gap = 2.8 * carH
-const MOVE_RAIL_AMP_MIN = 20;           // Moving rail min amplitude in px
-const MOVE_RAIL_AMP_MAX = 40;           // Moving rail max amplitude in px
-const MOVE_RAIL_SPEED_SLOW = 0.9;       // Moving rail slow speed (level 9)
-const MOVE_RAIL_SPEED_FAST = 1.8;       // Moving rail fast speed (level 15)
+const SEG_LEN_MAX_RATIO = 1.00;         // Segment length ratio at high difficulty (1.0 * base)
+const BASE_SEGMENT_LEN = 280;           // Base segment length in pixels (never shorter than base)
+const INTRA_LEVEL_GROWTH = 0.12;        // Difficulty rises gently inside each level
+const INTRA_LEVEL_EASY_FRACTION = 0.20; // First 20% of each level starts easier
+const SQUEEZE_GAP_RATIO = 2.9;          // Squeeze section gap = 2.9 * carH (only from level 10)
+const MOVE_RAIL_AMP_MIN = 8;            // Moving rail min amplitude in px
+const MOVE_RAIL_AMP_MAX = 20;           // Moving rail max amplitude in px (at most 0.5 * carH = 20px)
+const MOVE_RAIL_SPEED_SLOW = 0.8;       // Moving rail slow speed (only from level 14)
+const MOVE_RAIL_SPEED_FAST = 1.3;       // Moving rail fast speed
 
-const START_ROAD_START = -100, START_ROAD_END = 380;
+const START_ROAD_START = -100, START_ROAD_END = 500;
 const TUNNEL_START_X = START_ROAD_END;
 const TUNNEL_LENGTH = 1400;
 const TUNNEL_END_X = TUNNEL_START_X + TUNNEL_LENGTH;
 const CALM_OPEN_GAP = 300;
+
+// Long finish road, checkered finish line, and stopping constants
+const FINISH_ROAD_LENGTH = 2.4 * W;
+const FINISH_LINE_AT = 0.55;
+const STOP_TIME = 1.3;
+
+const FINISH_ROAD_LEN = FINISH_ROAD_LENGTH;
 const FINISH_ROAD_X = TUNNEL_END_X + CALM_OPEN_GAP;
-const FINISH_ROAD_LEN = 600;
-const FINISH_ROAD_END = FINISH_ROAD_X + FINISH_ROAD_LEN;
-const LEVEL_LENGTH = FINISH_ROAD_X - CAR_X;
+const FINISH_ROAD_END = FINISH_ROAD_X + FINISH_ROAD_LENGTH;
+const FINISH_LINE_X = FINISH_ROAD_X + FINISH_ROAD_LENGTH * FINISH_LINE_AT;
+const LEVEL_LENGTH = FINISH_LINE_X - CAR_X;
 
 const RETRY_FROM_LEVEL_START = true;
 
@@ -185,6 +208,13 @@ let carImgLoaded = false;
 let carImgFailed = false;
 let trimmedCarCanvas = null;
 let carFadeAlpha = 0;
+
+let rearWheelSprite = null;
+let frontWheelSprite = null;
+let wheelSpritesReady = false;
+let wheelAngle = 0;
+let thrustSpinMultiplier = 1.0;
+let currentAngularSpeed = 0;
 
 const preloadedPictures = [];
 let finishedAssetsCount = 0;
@@ -319,12 +349,331 @@ function processCarImage(img) {
       CAR_DRAW_H = Math.round(CAR_DRAW_W * (trimH / trimW));
       CAR_REST_Y = ROAD_TOP + 3;
       if (st === 'ready') cy = CAR_REST_Y;
+
+      buildWheelSprites();
     }
     carImgLoaded = true;
   } catch (err) {
     console.warn('Failed to process car image:', err);
     if (!loadingErrorMsg) loadingErrorMsg = 'ChromaKey: ' + (err.message || String(err));
   }
+}
+
+let currentRimStyle = 'silver_sport';
+try {
+  const savedStyle = localStorage.getItem('skycarRimStyle');
+  if (savedStyle && ['silver_sport', 'racing_gold', 'stealth_black'].includes(savedStyle)) {
+    currentRimStyle = savedStyle;
+  }
+} catch(e) {}
+
+const RIM_STYLE_CONFIGS = {
+  silver_sport: {
+    name: 'Silver Sport',
+    lipOuter: '#f8fafc',
+    lipInner: '#94a3b8',
+    barrel: '#1e293b',
+    spokeFace: '#e2e8f0',
+    spokeLight: '#ffffff',
+    spokeDark: '#475569',
+    hubRing: '#f1f5f9',
+    hubCenter: '#0f172a',
+    hubAccent: '#ef4444',
+    nutColor: '#f8fafc'
+  },
+  racing_gold: {
+    name: 'Tuner Gold',
+    lipOuter: '#fef08a',
+    lipInner: '#ca8a04',
+    barrel: '#1c1917',
+    spokeFace: '#eab308',
+    spokeLight: '#fef08a',
+    spokeDark: '#854d0e',
+    hubRing: '#fef08a',
+    hubCenter: '#18181b',
+    hubAccent: '#dc2626',
+    nutColor: '#fef9c3'
+  },
+  stealth_black: {
+    name: 'Stealth Black',
+    lipOuter: '#e2e8f0',
+    lipInner: '#64748b',
+    barrel: '#090d16',
+    spokeFace: '#1e293b',
+    spokeLight: '#475569',
+    spokeDark: '#020617',
+    hubRing: '#cbd5e1',
+    hubCenter: '#090d16',
+    hubAccent: '#3b82f6',
+    nutColor: '#94a3b8'
+  }
+};
+
+function createCustomAlloyRim(size = 256, styleKey = currentRimStyle) {
+  const cfg = RIM_STYLE_CONFIGS[styleKey] || RIM_STYLE_CONFIGS.silver_sport;
+  const canv = document.createElement('canvas');
+  canv.width = size;
+  canv.height = size;
+  const c = canv.getContext('2d');
+  if (!c) return null;
+
+  const cx = size / 2;
+  const cy = size / 2;
+  const R = size * 0.48;
+
+  c.clearRect(0, 0, size, size);
+
+  c.save();
+  c.beginPath();
+  c.arc(cx, cy, R, 0, Math.PI * 2);
+  c.clip();
+
+  // Dark Wheel Barrel
+  c.fillStyle = cfg.barrel;
+  c.fillRect(0, 0, size, size);
+
+  // Vented Brake Rotor background disc
+  const rotorR = R * 0.88;
+  const rotorGrad = c.createRadialGradient(cx, cy, R * 0.15, cx, cy, rotorR);
+  rotorGrad.addColorStop(0, '#2b3442');
+  rotorGrad.addColorStop(0.7, '#1f2733');
+  rotorGrad.addColorStop(1, '#151b24');
+  c.fillStyle = rotorGrad;
+  c.beginPath();
+  c.arc(cx, cy, rotorR, 0, Math.PI * 2);
+  c.fill();
+
+  // Rotor surface concentric machining grooves
+  c.strokeStyle = 'rgba(255, 255, 255, 0.06)';
+  c.lineWidth = 1.2;
+  for (let rG = R * 0.35; rG <= rotorR - 4; rG += 7) {
+    c.beginPath();
+    c.arc(cx, cy, rG, 0, Math.PI * 2);
+    c.stroke();
+  }
+
+  // Cross-drilled rotor holes (sporty brake vent holes)
+  c.fillStyle = '#0b0f17';
+  for (let a = 0; a < Math.PI * 2; a += Math.PI / 8) {
+    for (let rD = R * 0.42; rD <= rotorR - 8; rD += 12) {
+      const hx = cx + Math.cos(a + rD * 0.015) * rD;
+      const hy = cy + Math.sin(a + rD * 0.015) * rD;
+      c.beginPath();
+      c.arc(hx, hy, 1.8, 0, Math.PI * 2);
+      c.fill();
+    }
+  }
+
+  // 5-Spoke Twin-Beam High Performance Forged Alloy
+  const spokes = 5;
+  const spokeStep = (Math.PI * 2) / spokes;
+  const hubR = R * 0.28;
+  const rimInnerR = R * 0.86;
+
+  for (let i = 0; i < spokes; i++) {
+    const angle = i * spokeStep;
+
+    c.save();
+    c.translate(cx, cy);
+    c.rotate(angle);
+
+    // Drop shadow under each spoke onto rotor
+    c.fillStyle = 'rgba(0, 0, 0, 0.45)';
+    c.beginPath();
+    c.moveTo(-R * 0.14, hubR * 0.8 + 2);
+    c.lineTo(-R * 0.18, rimInnerR + 2);
+    c.lineTo(R * 0.18, rimInnerR + 2);
+    c.lineTo(R * 0.14, hubR * 0.8 + 2);
+    c.closePath();
+    c.fill();
+
+    // Twin-Spoke Left Beam
+    c.fillStyle = cfg.spokeDark;
+    c.beginPath();
+    c.moveTo(-R * 0.15, hubR);
+    c.lineTo(-R * 0.20, rimInnerR);
+    c.lineTo(-R * 0.12, rimInnerR);
+    c.lineTo(-R * 0.07, hubR);
+    c.closePath();
+    c.fill();
+
+    c.fillStyle = cfg.spokeFace;
+    c.beginPath();
+    c.moveTo(-R * 0.13, hubR + 1);
+    c.lineTo(-R * 0.18, rimInnerR - 1);
+    c.lineTo(-R * 0.11, rimInnerR - 1);
+    c.lineTo(-R * 0.06, hubR + 1);
+    c.closePath();
+    c.fill();
+
+    c.strokeStyle = cfg.spokeLight;
+    c.lineWidth = 1.6;
+    c.beginPath();
+    c.moveTo(-R * 0.18, rimInnerR - 1);
+    c.lineTo(-R * 0.13, hubR + 1);
+    c.stroke();
+
+    // Twin-Spoke Right Beam
+    c.fillStyle = cfg.spokeDark;
+    c.beginPath();
+    c.moveTo(R * 0.07, hubR);
+    c.lineTo(R * 0.12, rimInnerR);
+    c.lineTo(R * 0.20, rimInnerR);
+    c.lineTo(R * 0.15, hubR);
+    c.closePath();
+    c.fill();
+
+    c.fillStyle = cfg.spokeFace;
+    c.beginPath();
+    c.moveTo(R * 0.06, hubR + 1);
+    c.lineTo(R * 0.11, rimInnerR - 1);
+    c.lineTo(R * 0.18, rimInnerR - 1);
+    c.lineTo(R * 0.13, hubR + 1);
+    c.closePath();
+    c.fill();
+
+    c.strokeStyle = cfg.spokeLight;
+    c.lineWidth = 1.6;
+    c.beginPath();
+    c.moveTo(R * 0.11, rimInnerR - 1);
+    c.lineTo(R * 0.06, hubR + 1);
+    c.stroke();
+
+    // Spoke-to-rim mounting joint
+    c.fillStyle = cfg.spokeFace;
+    c.beginPath();
+    c.arc(0, rimInnerR, R * 0.18, Math.PI * 0.85, Math.PI * 0.15, true);
+    c.fill();
+
+    c.restore();
+  }
+
+  // Polished Chrome Outer Lip & Rim Flange
+  c.strokeStyle = 'rgba(0, 0, 0, 0.4)';
+  c.lineWidth = 3;
+  c.beginPath();
+  c.arc(cx, cy, rimInnerR, 0, Math.PI * 2);
+  c.stroke();
+
+  const lipGrad = c.createLinearGradient(0, cy - R, size, cy + R);
+  lipGrad.addColorStop(0.0, cfg.lipOuter);
+  lipGrad.addColorStop(0.25, cfg.lipInner);
+  lipGrad.addColorStop(0.5, cfg.lipOuter);
+  lipGrad.addColorStop(0.75, cfg.lipInner);
+  lipGrad.addColorStop(1.0, cfg.lipOuter);
+
+  c.strokeStyle = lipGrad;
+  c.lineWidth = R * 0.11;
+  c.beginPath();
+  c.arc(cx, cy, R * 0.94, 0, Math.PI * 2);
+  c.stroke();
+
+  c.strokeStyle = cfg.spokeLight;
+  c.lineWidth = 1.5;
+  c.beginPath();
+  c.arc(cx, cy, R - 1, 0, Math.PI * 2);
+  c.stroke();
+
+  c.strokeStyle = cfg.spokeDark;
+  c.lineWidth = 1.5;
+  c.beginPath();
+  c.arc(cx, cy, R * 0.88, 0, Math.PI * 2);
+  c.stroke();
+
+  // Center Hub Plate & Chrome Lug Nuts
+  const hubGrad = c.createRadialGradient(cx, cy, 2, cx, cy, hubR);
+  hubGrad.addColorStop(0, cfg.spokeFace);
+  hubGrad.addColorStop(0.6, cfg.spokeDark);
+  hubGrad.addColorStop(1, '#0f172a');
+  c.fillStyle = hubGrad;
+  c.beginPath();
+  c.arc(cx, cy, hubR, 0, Math.PI * 2);
+  c.fill();
+
+  c.strokeStyle = cfg.hubRing;
+  c.lineWidth = 2.2;
+  c.beginPath();
+  c.arc(cx, cy, hubR, 0, Math.PI * 2);
+  c.stroke();
+
+  // 5 Chrome Lug Nuts arranged in star pattern
+  const nutR = hubR * 0.65;
+  for (let i = 0; i < spokes; i++) {
+    const nAngle = i * spokeStep + (spokeStep / 2);
+    const nx = cx + Math.cos(nAngle) * nutR;
+    const ny = cy + Math.sin(nAngle) * nutR;
+
+    c.fillStyle = '#05070a';
+    c.beginPath();
+    c.arc(nx + 0.8, ny + 0.8, 4.2, 0, Math.PI * 2);
+    c.fill();
+
+    c.fillStyle = cfg.nutColor;
+    c.beginPath();
+    c.arc(nx, ny, 3.8, 0, Math.PI * 2);
+    c.fill();
+
+    c.fillStyle = '#0f172a';
+    c.beginPath();
+    c.arc(nx, ny, 1.6, 0, Math.PI * 2);
+    c.fill();
+  }
+
+  // Center Emblem Cap
+  const capR = hubR * 0.44;
+  c.fillStyle = cfg.hubCenter;
+  c.beginPath();
+  c.arc(cx, cy, capR, 0, Math.PI * 2);
+  c.fill();
+
+  c.strokeStyle = cfg.spokeLight;
+  c.lineWidth = 1.8;
+  c.beginPath();
+  c.arc(cx, cy, capR, 0, Math.PI * 2);
+  c.stroke();
+
+  c.fillStyle = cfg.hubAccent;
+  c.beginPath();
+  c.arc(cx, cy, capR * 0.45, 0, Math.PI * 2);
+  c.fill();
+
+  c.restore();
+  return canv;
+}
+
+function buildWheelSprites() {
+  try {
+    const sprite = createCustomAlloyRim(256, currentRimStyle);
+    if (sprite) {
+      rearWheelSprite = sprite;
+      frontWheelSprite = sprite;
+      wheelSpritesReady = true;
+    }
+  } catch (err) {
+    console.warn('Failed to build alloy wheel sprite:', err);
+    rearWheelSprite = null;
+    frontWheelSprite = null;
+    wheelSpritesReady = false;
+  }
+}
+
+function setAlloyRimStyle(newStyle) {
+  if (RIM_STYLE_CONFIGS[newStyle]) {
+    currentRimStyle = newStyle;
+    try { localStorage.setItem('skycarRimStyle', newStyle); } catch(e) {}
+    buildWheelSprites();
+  }
+}
+
+function cycleAlloyRimStyle() {
+  const styles = ['silver_sport', 'racing_gold', 'stealth_black'];
+  const nextIdx = (styles.indexOf(currentRimStyle) + 1) % styles.length;
+  const newStyle = styles[nextIdx];
+  setAlloyRimStyle(newStyle);
+  playClickSound();
+  triggerVibrate(30);
+  const cfg = RIM_STYLE_CONFIGS[newStyle];
+  showToast('Alloy Rim: ' + cfg.name);
 }
 
 function initAssetPreloading() {
@@ -439,12 +788,169 @@ try {
 
 function initAudio() {
   if (audioCtx) return;
-  const AudioContext = window.AudioContext || window.webkitAudioContext;
-  if (!AudioContext) return;
-  audioCtx = new AudioContext();
-  masterGain = audioCtx.createGain();
-  masterGain.gain.value = soundEnabled ? 0.35 : 0;
-  masterGain.connect(audioCtx.destination);
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    audioCtx = new AudioContext();
+    masterGain = audioCtx.createGain();
+    masterGain.gain.value = soundEnabled ? 0.35 : 0;
+    masterGain.connect(audioCtx.destination);
+    decodeGasPuffAudio();
+  } catch(e) {}
+}
+
+function ensureAudioContext() {
+  try {
+    if (!audioCtx) {
+      initAudio();
+    }
+    if (audioCtx && audioCtx.state === 'suspended') {
+      audioCtx.resume().catch(() => {});
+    }
+    if (audioCtx && !gasPuffAudioBuffer && !isPuffDecoding) {
+      decodeGasPuffAudio();
+    }
+  } catch(e) {}
+}
+
+const GAS_PUFF_BASE64 = "data:audio/mp3;base64,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";
+
+let gasPuffAudioBuffer = null;
+let isPuffDecoding = false;
+let wasThrustActive = false;
+let puffHoldTimer = 0;
+
+function decodeGasPuffAudio() {
+  if (gasPuffAudioBuffer || isPuffDecoding) return;
+  if (!audioCtx) return;
+  try {
+    isPuffDecoding = true;
+    const base64Str = GAS_PUFF_BASE64.split(',')[1];
+    const binary = atob(base64Str);
+    const len = binary.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    const onSuccess = (buf) => {
+      gasPuffAudioBuffer = buf;
+      isPuffDecoding = false;
+    };
+    const onError = (err) => {
+      console.warn('gas_puff decode failed, fallback will be used', err);
+      gasPuffAudioBuffer = null;
+      isPuffDecoding = false;
+    };
+    const res = audioCtx.decodeAudioData(bytes.buffer.slice(0), onSuccess, onError);
+    if (res && typeof res.then === 'function') {
+      res.then(onSuccess).catch(onError);
+    }
+  } catch (err) {
+    gasPuffAudioBuffer = null;
+    isPuffDecoding = false;
+  }
+}
+
+function playSynthesizedPuff(targetVol, targetRate) {
+  if (!audioCtx) return;
+  try {
+    const sampleRate = audioCtx.sampleRate || 44100;
+    const dur = 0.18;
+    const frameCount = Math.floor(sampleRate * dur);
+    const noiseBuffer = audioCtx.createBuffer(1, frameCount, sampleRate);
+    const data = noiseBuffer.getChannelData(0);
+    for (let i = 0; i < frameCount; i++) {
+      data[i] = Math.random() * 2 - 1;
+    }
+
+    const src = audioCtx.createBufferSource();
+    src.buffer = noiseBuffer;
+    src.playbackRate.value = targetRate || 1.0;
+
+    // High-pass filter at 2500 Hz
+    const hp = audioCtx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 2500;
+
+    // Band-pass filter at 5000 Hz (Q 0.7)
+    const bp = audioCtx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 5000;
+    bp.Q.value = 0.7;
+
+    // Volume envelope: rises to 0.8 in 30 ms, falls to 0.45 by 120 ms, cuts to 0 at 180 ms
+    const scale = (targetVol !== undefined) ? (targetVol / 0.8) : 1.0;
+    const g = audioCtx.createGain();
+    const now = audioCtx.currentTime;
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.linearRampToValueAtTime(0.8 * scale, now + 0.030);
+    g.gain.linearRampToValueAtTime(0.45 * scale, now + 0.120);
+    g.gain.linearRampToValueAtTime(0.0001, now + 0.180);
+
+    src.connect(hp);
+    hp.connect(bp);
+    bp.connect(g);
+    g.connect(masterGain || audioCtx.destination);
+
+    src.start(now);
+    src.stop(now + 0.180);
+  } catch (err) {
+    console.warn('Fallback synthesized puff error:', err);
+  }
+}
+
+function playSinglePuff(isInitial = false) {
+  if (!soundEnabled) return;
+  ensureAudioContext();
+  if (!audioCtx) return;
+
+  const rate = 0.92 + Math.random() * (1.08 - 0.92);
+  const vol = isInitial ? SFX_VOLUME : (SFX_VOLUME * (0.7 + Math.random() * 0.3));
+
+  if (gasPuffAudioBuffer) {
+    try {
+      const src = audioCtx.createBufferSource();
+      src.buffer = gasPuffAudioBuffer;
+      src.playbackRate.value = rate;
+
+      const g = audioCtx.createGain();
+      g.gain.value = vol;
+
+      src.connect(g);
+      g.connect(masterGain || audioCtx.destination);
+
+      src.start();
+    } catch (err) {
+      playSynthesizedPuff(vol, rate);
+    }
+  } else {
+    playSynthesizedPuff(vol, rate);
+  }
+}
+
+function updateThrustAudio(dt) {
+  const isThrustActive = (st === 'play' && hold && !autoLanding && !stopping && !settingsOpen);
+
+  if (!soundEnabled || !isThrustActive) {
+    wasThrustActive = false;
+    puffHoldTimer = 0;
+    return;
+  }
+
+  // Pressed: every time the thrust button is pressed, play immediately
+  if (!wasThrustActive) {
+    wasThrustActive = true;
+    puffHoldTimer = 0;
+    playSinglePuff(true);
+    return;
+  }
+
+  // While held: play a new puff every PUFF_INTERVAL = 0.2s
+  puffHoldTimer += dt;
+  if (puffHoldTimer >= PUFF_INTERVAL) {
+    puffHoldTimer -= PUFF_INTERVAL;
+    playSinglePuff(false);
+  }
 }
 
 function setSound(enabled) {
@@ -639,6 +1145,23 @@ function getLevelConfig(level) {
   const cfg = generateLevelConfig(level, prev);
   levelConfigCache.set(level, cfg);
   return cfg;
+}
+
+// Check if an actual custom background picture exists for this scene
+const REAL_SCENE_PICTURES = {
+  'Sky Town': 'image_39e1ec82.png'
+};
+
+function hasRealScenePicture(level, cfg) {
+  // Only Level 1 has an authentic dedicated background picture asset (Sky Town image_39e1ec82.png)
+  return level === 1 && !!cfg && (cfg.name === 'Sky Town' || cfg.name.startsWith('Sky Town'));
+}
+
+function getLevelDisplayText(level, cfg) {
+  if (hasRealScenePicture(level, cfg)) {
+    return `LEVEL ${level}: ${cfg.name.toUpperCase()}`;
+  }
+  return `LEVEL ${level}`;
 }
 
 let curConfig = getLevelConfig(1);
@@ -919,7 +1442,33 @@ function drawButtonIcon(type, cx, cy, sz) {
     ctx.fill(); ctx.stroke();
     ctx.fillStyle = '#0f172a';
     ctx.beginPath(); ctx.arc(-sz * 0.25, sz * 0.18, sz * 0.14, 0, 6.28); ctx.fill();
-    ctx.beginPath(); ctx.arc(sz * 0.25, sz * 0.18, sz * 0.14, 0, 6.28); ctx.fill();
+  } else if (type === 'wheel') {
+    ctx.fillStyle = '#f8fafc';
+    ctx.strokeStyle = '#0f172a';
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.arc(0, 0, sz * 0.44, 0, Math.PI * 2);
+    ctx.fill(); ctx.stroke();
+    // Inner dark rotor
+    ctx.fillStyle = '#334155';
+    ctx.beginPath();
+    ctx.arc(0, 0, sz * 0.36, 0, Math.PI * 2);
+    ctx.fill();
+    // 5 Spokes
+    ctx.strokeStyle = '#f8fafc';
+    ctx.lineWidth = 2.2;
+    for (let a = 0; a < 5; a++) {
+      const ang = a * (Math.PI * 2 / 5);
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(Math.cos(ang) * sz * 0.36, Math.sin(ang) * sz * 0.36);
+      ctx.stroke();
+    }
+    // Red sport center cap
+    ctx.fillStyle = '#ef4444';
+    ctx.beginPath();
+    ctx.arc(0, 0, sz * 0.12, 0, Math.PI * 2);
+    ctx.fill();
 
   } else if (type === 'close') {
     ctx.strokeStyle = '#ffffff';
@@ -1121,6 +1670,8 @@ let stopping = false;
 let stopTimer = 0;
 let levelCompleteTimer = 0;
 let levelJustCleared = 1;
+let autoLanding = false;
+let landingStartY = CAR_REST_Y;
 let confettis = [];
 let activePress = null;
 let resetConfirming = false;
@@ -1195,11 +1746,11 @@ function getDifficultyDistance() {
 }
 
 // 1. Difficulty Growth:
-// f = 1 - exp(-(L - 1) / 10) (0 at level 1, ~0.6 at level 11, 0.86 at level 21)
-// 2. Intra-level: rises by ~15% from start to end; first 15% starts a bit easier
+// f = 1 - exp(-(L - 1) / 30) (much slower growth: f=0 at level 1, f~0.28 at level 11, f~0.49 at level 21)
+// 2. Intra-level: rises gently from start to end; first 20% starts easier
 function getLevelDifficulty(lvl, p = 0) {
   const L = lvl || curLevel;
-  const fBase = 1 - Math.exp(-(L - 1) / 10);
+  const fBase = 1 - Math.exp(-(L - 1) / 30);
 
   let intra = 1.0;
   if (p < INTRA_LEVEL_EASY_FRACTION) {
@@ -1214,7 +1765,7 @@ function getLevelDifficulty(lvl, p = 0) {
   return { f, fBase, intra };
 }
 
-// Scroll speed multiplier = 1 + 0.45 * f
+// Scroll speed multiplier = 1 + 0.25 * f
 function scrollSpeed(difficultyDistance = getDifficultyDistance()) {
   const p = getLevelProgress();
   const { f } = getLevelDifficulty(curLevel, p);
@@ -1224,7 +1775,7 @@ function scrollSpeed(difficultyDistance = getDifficultyDistance()) {
 }
 const speed = scrollSpeed;
 
-// Gap height = lerp(4.2, 2.4, f) * carH (never below 2.4 * carH)
+// Gap height = lerp(4.4, 3.0, f) * carH (never below 3.0 * carH)
 function getGapHeight(lvl, p = 0) {
   const { f } = getLevelDifficulty(lvl, p);
   const gapRatio = lerp(GAP_LEVEL_1_RATIO, GAP_MAX_DIFFICULTY_RATIO, f);
@@ -1239,19 +1790,17 @@ function showToast(msg) {
 
 // 3. SPIKE SIZES:
 // - levels 1 & 2: only small spikes
-// - levels 3 & 4: add medium spikes
-// - level 5+: big spikes appear occasionally (~10%), growing to ~35% by level 20
+// - levels 3 to 5: medium and small spikes
+// - level 6+: big spikes appear, reaching at most 20% of clusters at high levels
 function pickClusterSize(lvl, levelRng) {
   const L = lvl || curLevel;
-  if (L <= 2) {
-    return 'small';
-  }
-  if (L <= 4) {
+  if (L < 6) {
+    if (L <= 2) return 'small';
     return levelRng() < 0.5 ? 'medium' : 'small';
   }
-  const t = Math.max(0, Math.min(1, (L - 5) / (20 - 5)));
-  const pBig = 0.10 + (0.35 - 0.10) * t;
-  const pMed = 0.40;
+  const t = Math.max(0, Math.min(1, (L - 6) / (25 - 6)));
+  const pBig = 0.05 + (0.20 - 0.05) * t; // at most 20% even at high levels
+  const pMed = 0.35;
   const r = levelRng();
   if (r < pBig) return 'big';
   if (r < pBig + pMed) return 'medium';
@@ -1306,6 +1855,7 @@ let levelPRNG = mulberry32(1);
 let tunnelSegCount = 0;
 let levelSeedTwist = 'smooth_corridor';
 let gameTime = 0;
+let lastGap = 380;
 
 function addSeg(isOpen = false, forceLen) {
   const isTunnel = !isOpen && nextX >= TUNNEL_START_X && nextX < TUNNEL_END_X;
@@ -1317,61 +1867,62 @@ function addSeg(isOpen = false, forceLen) {
 
   const currentScrollSpeed = scrollSpeed();
 
-  // 1. Segment Length = lerp(1.3, 0.85, f) * BASE_SEGMENT_LEN
+  // 1. Segment Length = lerp(1.3, 1.0, f) * BASE_SEGMENT_LEN (never shorter than base length)
   const baseLen = lerp(SEG_LEN_LEVEL_1_RATIO, SEG_LEN_MAX_RATIO, f) * BASE_SEGMENT_LEN;
-  let len = forceLen || Math.round(baseLen);
+  let len = forceLen || Math.max(BASE_SEGMENT_LEN, Math.round(baseLen));
 
   if (!isOpen && nextX + len > TUNNEL_END_X) {
     len = Math.max(60, TUNNEL_END_X - nextX);
   }
 
-  // 2. Base Gap Height = lerp(4.2, 2.4, f) * carH
+  // 2. Base Gap Height = lerp(4.4, 3.0, f) * carH (never below 3.0 * carH)
   let gap = isOpen ? 380 : getGapHeight(curLevel, p);
 
-  // 4. NEW TWISTS:
-  // - level 6 adds short squeeze sections with gap of about 2.8 * carH
-  // - level 12 adds two squeeze sections in a row
+  // 3. Squeeze sections (gap about 2.9 * carH) only from level 10
   let isSqueeze = false;
-  if (!isOpen && curLevel >= 6) {
-    if (curLevel >= 12) {
-      if (segIndex === 2 || segIndex === 3) isSqueeze = true;
+  if (!isOpen && curLevel >= 10) {
+    if (curLevel >= 18) {
+      if (segIndex === 3 || segIndex === 4) isSqueeze = true;
     } else {
-      if (segIndex === 2) isSqueeze = true;
+      if (segIndex === 3) isSqueeze = true;
     }
   }
   if (isSqueeze) {
-    gap = Math.max(GAP_MAX_DIFFICULTY_RATIO * CAR_HITBOX_H, SQUEEZE_GAP_RATIO * CAR_HITBOX_H);
-    len = Math.max(140, Math.round(len * 0.8));
+    gap = SQUEEZE_GAP_RATIO * CAR_HITBOX_H; // about 2.9 * carH
+    len = Math.max(BASE_SEGMENT_LEN, Math.round(len * 0.9));
   }
 
   // Seed twists for this level:
   if (!isOpen) {
     if (levelSeedTwist === 'tight_corridor' && (segIndex === 1 || segIndex === 2)) {
-      gap = Math.max(GAP_MAX_DIFFICULTY_RATIO * CAR_HITBOX_H, gap * 0.90);
+      gap = Math.max(GAP_MAX_DIFFICULTY_RATIO * CAR_HITBOX_H, gap * 0.94);
     }
   }
 
-  // Moving rails:
-  // - level 9 adds slowly moving rails (up and down by 20 to 40 px)
-  // - level 15 adds faster moving rails
+  // 4. Moving rails: only from level 14, small amplitude (at most 0.5 * carH = 20px)
   let moving = false;
   let moveAmp = 0;
   let moveSpeed = 0;
   let movePhase = 0;
 
-  if (!isOpen && curLevel >= 9) {
-    const isMovingSeg = (curLevel >= 15) ? (segIndex === 1 || segIndex === 3) : (segIndex === 1);
+  if (!isOpen && curLevel >= 14) {
+    const isMovingSeg = (curLevel >= 22) ? (segIndex === 2 || segIndex === 4) : (segIndex === 2);
     if (isMovingSeg) {
       moving = true;
       moveAmp = MOVE_RAIL_AMP_MIN + levelPRNG() * (MOVE_RAIL_AMP_MAX - MOVE_RAIL_AMP_MIN);
-      moveSpeed = (curLevel >= 15) ? MOVE_RAIL_SPEED_FAST : MOVE_RAIL_SPEED_SLOW;
+      moveSpeed = 1.0;
       movePhase = levelPRNG() * Math.PI * 2;
     }
   }
 
-  // 5. Vertical step between segments = lerp(0.15, 0.6, f) * maxFairStep
-  // Fairness always wins: vertical step never exceeds 0.6 * MAX_UP_SPEED * segmentLength / scrollSpeed
-  const maxFairStep = 0.6 * MAX_UP_SPEED * (len / currentScrollSpeed);
+  // 5. FAIR STEPS WITH REACTION TIME (Requirement 2):
+  // The vertical step between two neighboring segments must be at most min(0.5 * gapHeight, 0.4 * MAX_UP_SPEED * segmentLength / scrollSpeed).
+  // Also require that the gap windows of two neighboring segments overlap by at least 1.4 * carH:
+  // |cB - cA| <= (lastGap + gap)/2 - 1.4 * carH. If a generated step breaks a rule, reduce it.
+  const fairStep = Math.min(0.5 * gap, 0.4 * MAX_UP_SPEED * (len / currentScrollSpeed));
+  const overlapStepLimit = Math.max(8, (lastGap + gap) / 2 - 1.4 * CAR_HITBOX_H);
+  const maxFairStep = Math.min(fairStep, overlapStepLimit);
+
   const stepRatio = lerp(STEP_MIN_RATIO, STEP_MAX_RATIO, f);
   let maxShift = isOpen ? 15 : (stepRatio * maxFairStep);
 
@@ -1390,21 +1941,51 @@ function addSeg(isOpen = false, forceLen) {
   // Strict fairness clamp: never exceed maxFairStep
   maxShift = Math.min(maxShift, maxFairStep);
 
-  const minC = gap / 2 + 50;
-  const maxC = H - gap / 2 - 50;
-  if (!isOpen) {
-    lastC = Math.max(minC, Math.min(maxC, lastC));
-    if (lastC - minC < maxShift && shiftDir < 0) shiftDir = Math.abs(shiftDir);
-    else if (maxC - lastC < maxShift && shiftDir > 0) shiftDir = -Math.abs(shiftDir);
-  }
+  // Vertical band constraints for the tunnel:
+  // - Gap center must stay between TUNNEL_CENTER_MIN * H and TUNNEL_CENTER_MAX * H.
+  // - Gap edges must stay at least 0.12 * H away from the top HUD area: c - gap/2 >= 0.12 * H
+  // - Gap edges must stay at least 0.20 * H above the bottom of the screen: c + gap/2 <= 0.80 * H
+  const bandMinC = Math.max(TUNNEL_CENTER_MIN * H, gap / 2 + 0.12 * H);
+  const bandMaxC = Math.min(TUNNEL_CENTER_MAX * H, H * 0.80 - gap / 2);
+  const safeMinC = Math.min(bandMinC, bandMaxC);
+  const safeMaxC = Math.max(bandMinC, bandMaxC);
+  const targetStartCenter = TUNNEL_START_CENTER * H;
+  const carH = Math.max(CAR_HITBOX_H, CAR_DRAW_H);
+  const maxRiseStep = 0.4 * carH;
 
-  let c = isOpen ? (ROAD_TOP - 20) : (lastC + shiftDir * maxShift);
-  c = Math.max(minC, Math.min(maxC, c));
+  let c;
+  if (isOpen) {
+    c = ROAD_TOP - 20;
+    lastC = c;
+  } else if (segIndex < 3) {
+    // The first 3 tunnel segments rise smoothly from the road height to the center band,
+    // in steps of at most 0.4 * carH each, reaching TUNNEL_START_CENTER (0.50 * H).
+    const remainingSteps = 3 - segIndex;
+    const riseNeeded = lastC - targetStartCenter;
+    const stepUp = Math.min(maxRiseStep, Math.max(0, riseNeeded / remainingSteps));
+    c = lastC - stepUp;
+    c = Math.max(safeMinC, Math.min(safeMaxC, c));
+    if (Math.abs(c - lastC) > maxFairStep) {
+      c = lastC + Math.sign(c - lastC) * maxFairStep;
+    }
+    lastC = c;
+  } else {
+    // Keep the steps inside the band: if a step would leave the band, flip its direction so the corridor stays in the band
+    if (shiftDir < 0 && (lastC - maxShift < safeMinC)) {
+      shiftDir = Math.abs(shiftDir);
+    } else if (shiftDir > 0 && (lastC + maxShift > safeMaxC)) {
+      shiftDir = -Math.abs(shiftDir);
+    }
 
-  if (!isOpen && Math.abs(c - lastC) > maxFairStep) {
-    c = lastC + Math.sign(c - lastC) * maxFairStep;
+    c = lastC + shiftDir * maxShift;
+    c = Math.max(safeMinC, Math.min(safeMaxC, c));
+
+    // Keep all fairness rules: vertical step never exceeds maxFairStep
+    if (Math.abs(c - lastC) > maxFairStep) {
+      c = lastC + Math.sign(c - lastC) * maxFairStep;
+    }
+    lastC = c;
   }
-  lastC = c;
 
   const top = isOpen ? -300 : (c - gap / 2);
   const bot = isOpen ? (H + 300) : (c + gap / 2);
@@ -1429,7 +2010,74 @@ function addSeg(isOpen = false, forceLen) {
     movePhase
   });
 
+  lastGap = gap;
   nextX += len;
+}
+
+// 4. SANITIZE LEVEL SEGMENTS (Requirement 4):
+// Check every neighboring pair with the rules and fix if needed, so a level never has an impossible spot.
+function sanitizeLevelSegments(segmentList) {
+  const currentScrollSpeed = scrollSpeed();
+  const carH = CAR_HITBOX_H;
+
+  for (let i = 1; i < segmentList.length; i++) {
+    const prev = segmentList[i - 1];
+    const curr = segmentList[i];
+    if (prev.isOpen || curr.isOpen) continue;
+
+    const gapA = prev.bot - prev.top;
+    const gapB = curr.bot - curr.top;
+    const lenB = curr.w;
+
+    // 1. Step limit = min(0.5 * gapB, 0.4 * MAX_UP_SPEED * lenB / currentScrollSpeed)
+    const fairStep = Math.min(0.5 * gapB, 0.4 * MAX_UP_SPEED * (lenB / currentScrollSpeed));
+
+    // 2. Window overlap >= 1.4 * carH => |cB - cA| <= (gapA + gapB)/2 - 1.4 * carH
+    const overlapStepLimit = Math.max(8, (gapA + gapB) / 2 - 1.4 * carH);
+    const maxAllowedStep = Math.min(fairStep, overlapStepLimit);
+
+    const cA = (prev.top + prev.bot) / 2;
+    let cB = (curr.top + curr.bot) / 2;
+
+    const diff = cB - cA;
+    if (Math.abs(diff) > maxAllowedStep) {
+      cB = cA + Math.sign(diff) * maxAllowedStep;
+    }
+
+    // Band clamp
+    const bandMinC = Math.max(TUNNEL_CENTER_MIN * H, gapB / 2 + 0.12 * H);
+    const bandMaxC = Math.min(TUNNEL_CENTER_MAX * H, H * 0.80 - gapB / 2);
+    const safeMinC = Math.min(bandMinC, bandMaxC);
+    const safeMaxC = Math.max(bandMinC, bandMaxC);
+    cB = Math.max(safeMinC, Math.min(safeMaxC, cB));
+
+    // Ensure overlap >= 1.4 * carH
+    const curOverlap = Math.min(prev.bot, cB + gapB / 2) - Math.max(prev.top, cB - gapB / 2);
+    if (curOverlap < 1.4 * carH) {
+      cB = (cB > cA) ? (prev.bot + gapB / 2 - 1.4 * carH) : (prev.top - gapB / 2 + 1.4 * carH);
+      cB = Math.max(safeMinC, Math.min(safeMaxC, cB));
+    }
+
+    curr.top = cB - gapB / 2;
+    curr.bot = cB + gapB / 2;
+    curr.curTop = curr.top;
+    curr.curBot = curr.bot;
+
+    // Spikes clearance check
+    if (curr.topSpikes && curr.botSpikes) {
+      const maxSpikeSum = Math.max(0, (curr.bot - curr.top) - (carH + 20));
+      for (let k = 0; k < curr.topSpikes.length; k++) {
+        if (curr.topSpikes[k].h + curr.botSpikes[k].h > maxSpikeSum) {
+          const excess = (curr.topSpikes[k].h + curr.botSpikes[k].h) - maxSpikeSum;
+          if (curr.topSpikes[k].h >= curr.botSpikes[k].h) {
+            curr.topSpikes[k].h = Math.max(10, curr.topSpikes[k].h - excess);
+          } else {
+            curr.botSpikes[k].h = Math.max(10, curr.botSpikes[k].h - excess);
+          }
+        }
+      }
+    }
+  }
 }
 
 function startLevel(lvl) {
@@ -1439,10 +2087,14 @@ function startLevel(lvl) {
   thrust = 0;
   cy = CAR_REST_Y;
   lastC = ROAD_TOP - 20;
+  lastGap = 380;
   parts = [];
   stopping = false;
   stopTimer = 0;
+  autoLanding = false;
+  landingStartY = CAR_REST_Y;
   levelCompleteTimer = 0;
+  levelJustCleared = 0;
   confettis = [];
   tunnelSegCount = 0;
   camSamples = [];
@@ -1450,6 +2102,7 @@ function startLevel(lvl) {
   realSpeedPxPerSec = 0;
 
   const cfg = getLevelConfig(lvl);
+  curConfig = cfg;
   prerenderSpikes(cfg);
   prerenderFallbackScene(cfg);
 
@@ -1468,10 +2121,24 @@ function startLevel(lvl) {
     addSeg(false);
   }
 
+  // Requirement 4: Sanitize all neighboring segment pairs
+  sanitizeLevelSegments(segs);
+
   const postW = (FINISH_ROAD_END + 500) - TUNNEL_END_X;
   const endSpikes = makeSpikes(postW, curLevel, -300, H + 300, true, levelPRNG);
   segs.push({ x: TUNNEL_END_X, w: postW, top: -300, bot: H + 300, curTop: -300, curBot: H + 300, topSpikes: endSpikes.topSpikes, botSpikes: endSpikes.botSpikes, isOpen: true, moving: false });
   nextX = TUNNEL_END_X + postW;
+}
+
+function advanceToNextLevel() {
+  const nextLvl = (levelJustCleared ? levelJustCleared + 1 : curLevel + 1);
+  curLevel = nextLvl;
+  saveProgress(curLevel, Math.max(highestLevel, curLevel), best);
+  startLevel(curLevel);
+  st = 'transition';
+  transitionTimer = 0;
+  hold = false;
+  thrust = 0;
 }
 
 function resetGame() {
@@ -1607,31 +2274,150 @@ function drawRoadPlatform(startX, endX, roadTop, isFinish = false) {
   if (isFinish) {
     ctx.save();
     const cfg = curConfig;
-    const postPositions = [startX + 80, startX + 220, startX + 360, startX + 460];
-    for (const wx of postPositions) {
-      if (wx >= startX && wx <= endX) {
-        const px = wx - cam;
-        if (px > -30 && px < W + 30) {
-          ctx.fillStyle = '#64748b';
-          ctx.fillRect(px - 2, roadTop - 42, 4, 42);
+    const finishLineWx = startX + (endX - startX) * FINISH_LINE_AT;
+    const flX = finishLineWx - cam;
 
-          ctx.fillStyle = '#facc15';
-          ctx.shadowColor = '#facc15';
-          ctx.shadowBlur = 10;
-          ctx.beginPath();
-          ctx.arc(px, roadTop - 42, 4.5, 0, 6.28);
-          ctx.fill();
-          ctx.shadowBlur = 0;
+    // 1. Checkered Finish Line Strip across the asphalt road
+    if (flX > -40 && flX < W + 40) {
+      const stripW = 16;
+      const cols = 2;
+      const rows = 4;
+      const cellW = stripW / cols;
+      const cellH = bandH / rows;
 
-          ctx.fillStyle = cfg.accentColor;
-          ctx.beginPath();
-          ctx.moveTo(px + 2, roadTop - 38);
-          ctx.lineTo(px + 24, roadTop - 30);
-          ctx.lineTo(px + 2, roadTop - 22);
-          ctx.closePath();
-          ctx.fill();
+      ctx.save();
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
+      ctx.shadowBlur = 4;
+      for (let c = 0; c < cols; c++) {
+        for (let r = 0; r < rows; r++) {
+          ctx.fillStyle = ((c + r) % 2 === 0) ? '#ffffff' : '#0f172a';
+          ctx.fillRect(flX - stripW / 2 + c * cellW, roadTop + r * cellH, cellW, cellH);
         }
       }
+      ctx.fillStyle = '#facc15';
+      ctx.fillRect(flX - stripW / 2 - 1.5, roadTop, 1.5, bandH);
+      ctx.fillRect(flX + stripW / 2, roadTop, 1.5, bandH);
+      ctx.restore();
+
+      // 2. Two Finish Flags placed at about 85% of the road length
+      for (const side of [-1, 1]) {
+        const poleX = flX + side * 15;
+        const poleBaseY = roadTop + 2;
+        const poleTopY = roadTop - 50;
+
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
+        ctx.beginPath();
+        ctx.ellipse(poleX + 1, poleBaseY, 5, 2, 0, 0, 6.28);
+        ctx.fill();
+
+        // Silver pole
+        ctx.fillStyle = '#cbd5e1';
+        ctx.fillRect(poleX - 1.5, poleTopY, 3, poleBaseY - poleTopY);
+
+        // Gold finial sphere
+        ctx.fillStyle = '#facc15';
+        ctx.beginPath();
+        ctx.arc(poleX, poleTopY, 4, 0, 6.28);
+        ctx.fill();
+
+        // Waving checkered flag
+        const flagW = 22 * side;
+        const flagTop = poleTopY + 2;
+        const flagH = 22;
+        const fRows = 3, fCols = 3;
+        const fSqW = flagW / fCols;
+        const fSqH = flagH / fRows;
+        for (let fc = 0; fc < fCols; fc++) {
+          for (let fr = 0; fr < fRows; fr++) {
+            const wave = Math.sin(fc * 0.8 + gameTime * 6) * 2;
+            ctx.fillStyle = ((fc + fr) % 2 === 0) ? '#ffffff' : '#0f172a';
+            ctx.fillRect(poleX + fc * fSqW, flagTop + fr * fSqH + wave, fSqW, fSqH);
+          }
+        }
+      }
+    }
+
+    // 3. Safety rail at the end of the road
+    const railScreenX = endX - cam;
+    if (railScreenX > -40 && railScreenX < W + 40) {
+      const rx = railScreenX - 8;
+      // Heavy steel posts
+      ctx.fillStyle = '#1e293b';
+      ctx.fillRect(rx - 3, roadTop - 26, 6, bandH + 26);
+      ctx.fillRect(rx + 4, roadTop - 26, 6, bandH + 26);
+
+      // Crash barrier body
+      const barrierW = 16;
+      ctx.fillStyle = '#475569';
+      ctx.fillRect(rx - 4, roadTop - 22, barrierW, 14);
+
+      // Red and white hazard warning stripes
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(rx - 4, roadTop - 22, barrierW, 14);
+      ctx.clip();
+      for (let sx = -12; sx < barrierW + 12; sx += 6) {
+        ctx.fillStyle = (Math.floor(sx / 6) % 2 === 0) ? '#ef4444' : '#ffffff';
+        ctx.beginPath();
+        ctx.moveTo(rx - 4 + sx, roadTop - 8);
+        ctx.lineTo(rx - 4 + sx + 6, roadTop - 8);
+        ctx.lineTo(rx - 4 + sx + 12, roadTop - 22);
+        ctx.lineTo(rx - 4 + sx + 6, roadTop - 22);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.restore();
+
+      // Red reflector caps
+      ctx.fillStyle = '#ef4444';
+      ctx.fillRect(rx - 4, roadTop - 28, 7, 3);
+      ctx.fillRect(rx + 3, roadTop - 28, 7, 3);
+    }
+
+    // 4. Small man in black suit cheering after the finish line
+    const manWx = finishLineWx + 30;
+    const manX = manWx - cam;
+    if (manX > -30 && manX < W + 30) {
+      const footY = roadTop + 24; // Standing on asphalt surface
+      // Shadow
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+      ctx.beginPath();
+      ctx.ellipse(manX, footY + 1, 9, 3, 0, 0, 6.28);
+      ctx.fill();
+      // Legs (black trousers)
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(manX - 5, footY - 14, 4, 14);
+      ctx.fillRect(manX + 1, footY - 14, 4, 14);
+      // Torso / Suit jacket (black)
+      ctx.fillStyle = '#1e293b';
+      ctx.fillRect(manX - 7, footY - 30, 14, 17);
+      // White shirt collar & red tie
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.moveTo(manX - 3, footY - 30);
+      ctx.lineTo(manX + 3, footY - 30);
+      ctx.lineTo(manX, footY - 22);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#dc2626';
+      ctx.fillRect(manX - 1, footY - 28, 2, 8);
+      // Arms cheering up
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(manX - 9, footY - 36, 3, 16);
+      ctx.fillRect(manX + 6, footY - 36, 3, 16);
+      // Head
+      ctx.fillStyle = '#fbcfe8';
+      ctx.beginPath();
+      ctx.arc(manX, footY - 36, 5.5, 0, 6.28);
+      ctx.fill();
+      // Black hair
+      ctx.fillStyle = '#0f172a';
+      ctx.beginPath();
+      ctx.arc(manX, footY - 38, 5.5, 3.14, 6.28);
+      ctx.fill();
+      // Sunglasses
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(manX - 4, footY - 37, 8, 2.5);
     }
     ctx.restore();
   }
@@ -1991,14 +2777,101 @@ function car(drawX = CAR_X) {
     ctx.shadowOffsetY = 0;
     ctx.drawImage(trimmedCarCanvas, -drawW / 2, -drawH / 2, drawW, drawH);
 
-    // Dynamic rotating sports wheels (perfectly aligned with sports car wheel arches)
-    const rearX = -drawW / 2 + drawW * 0.1843;
-    const frontX = -drawW / 2 + drawW * 0.8190;
-    const wheelY = -drawH / 2 + drawH * 0.7026;
-    const wheelR = drawH * 0.2908;
+    // Dynamic rotating sports wheels built from the car image
+    if (wheelSpritesReady && rearWheelSprite && frontWheelSprite) {
+      try {
+        const rearX = -drawW / 2 + drawW * WHEEL_REAR_X;
+        const frontX = -drawW / 2 + drawW * WHEEL_FRONT_X;
+        const wheelY = -drawH / 2 + drawH * WHEEL_Y;
+        const rimR = drawW * WHEEL_SPIN_RADIUS;
+        const rimD = rimR * 2;
 
-    drawSportsWheel(rearX, wheelY, wheelR, wheelRot);
-    drawSportsWheel(frontX, wheelY, wheelR, wheelRot);
+        // Clean dark wheel cavity behind rim
+        ctx.save();
+        ctx.fillStyle = '#0f172a';
+        ctx.beginPath();
+        ctx.arc(rearX, wheelY, rimR + 0.8, 0, Math.PI * 2);
+        ctx.arc(frontX, wheelY, rimR + 0.8, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Performance red brake caliper (stays static behind spinning spokes)
+        for (const wx of [rearX, frontX]) {
+          ctx.save();
+          ctx.translate(wx, wheelY);
+          const calAngle = -Math.PI * 0.62;
+          ctx.rotate(calAngle);
+          ctx.translate(rimR * 0.72, 0);
+          ctx.fillStyle = '#dc2626';
+          ctx.fillRect(-rimR * 0.22, -rimR * 0.16, rimR * 0.44, rimR * 0.32);
+          ctx.fillStyle = '#f87171';
+          ctx.fillRect(-rimR * 0.22, -rimR * 0.16, rimR * 0.44, rimR * 0.08);
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(-rimR * 0.10, -rimR * 0.04, rimR * 0.20, rimR * 0.08);
+          ctx.restore();
+        }
+        ctx.restore();
+
+        // Draw rear rim sprite concentric to axle (spins only the rim; tire & body arch stay static)
+        ctx.save();
+        ctx.translate(rearX, wheelY);
+        ctx.rotate(wheelAngle);
+        ctx.drawImage(rearWheelSprite, -rimR, -rimR, rimD, rimD);
+        ctx.restore();
+
+        // Draw front rim sprite concentric to axle (spins only the rim; tire & body arch stay static)
+        ctx.save();
+        ctx.translate(frontX, wheelY);
+        ctx.rotate(wheelAngle);
+        ctx.drawImage(frontWheelSprite, -rimR, -rimR, rimD, rimD);
+        ctx.restore();
+
+        // Motion blur at high spin speed: draw wheel a second time rotated by a small extra angle with alpha 0.35
+        const isHighSpin = (Math.abs(currentAngularSpeed) > 12) || (thrustSpinMultiplier > 1.25);
+        if (isHighSpin) {
+          const blurOffset = 0.08 * (currentAngularSpeed >= 0 ? 1 : -1);
+          ctx.save();
+          ctx.globalAlpha = 0.35;
+          ctx.translate(rearX, wheelY);
+          ctx.rotate(wheelAngle - blurOffset);
+          ctx.drawImage(rearWheelSprite, -rimR, -rimR, rimD, rimD);
+          ctx.restore();
+
+          ctx.save();
+          ctx.globalAlpha = 0.35;
+          ctx.translate(frontX, wheelY);
+          ctx.rotate(wheelAngle - blurOffset);
+          ctx.drawImage(frontWheelSprite, -rimR, -rimR, rimD, rimD);
+          ctx.restore();
+        }
+
+        // Debug green circles at wheel positions (false by default)
+        if (SHOW_WHEEL_DEBUG) {
+          ctx.save();
+          ctx.lineWidth = 1.2;
+          // Green: spinning rim boundary
+          ctx.strokeStyle = '#00ff00';
+          ctx.beginPath();
+          ctx.arc(rearX, wheelY, rimR, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(frontX, wheelY, rimR, 0, Math.PI * 2);
+          ctx.stroke();
+          // Yellow: outer tire boundary
+          const tireR = drawW * WHEEL_RADIUS;
+          ctx.strokeStyle = '#facc15';
+          ctx.beginPath();
+          ctx.arc(rearX, wheelY, tireR, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(frontX, wheelY, tireR, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+        }
+      } catch (err) {
+        // Fallback to static car image (already drawn via trimmedCarCanvas above)
+        console.warn('Failed to render wheel sprites:', err);
+      }
+    }
   } else {
     // Fallback to drawn car if image fails to load
     ctx.scale(CAR_SCALE, CAR_SCALE);
@@ -2099,111 +2972,164 @@ function step(dt) {
     menuFadeTimer += dt;
   } else if (st === 'transition') {
     transitionTimer += dt;
-    if (transitionTimer >= 0.25 && curLevel !== nextLevelTarget) {
-      startLevel(nextLevelTarget);
-      hold = false;
-      thrust = 0;
-    }
-    if (transitionTimer >= 0.25) {
-      cam += sp * dt;
-      cy = CAR_REST_Y;
-      vy = 0;
-      thrust = 0;
-      wheelRot += sp * dt * (0.16 / CAR_SCALE);
+    cy = CAR_REST_Y;
+    vy = 0;
+    thrust = 0;
+    cam = 0;
+    const wheelRadiusPx = CAR_DRAW_W * WHEEL_RADIUS;
+    if (wheelRadiusPx > 0) {
+      currentAngularSpeed = sp / wheelRadiusPx;
+      wheelAngle += currentAngularSpeed * dt;
+      wheelRot = wheelAngle;
     }
     if (transitionTimer >= TITLE_CARD_DURATION) {
       st = 'play';
       hold = false;
+      thrust = 0;
     }
   } else if (st === 'play') {
     const wx = cam + CAR_X;
     const progress = getLevelProgress();
 
-    if (progress >= 1.0 && !stopping) {
+    // Requirement 2: Auto Landing
+    // Take over car with smooth autopilot as soon as the last spike has passed the car (wx >= TUNNEL_END_X).
+    if (wx >= TUNNEL_END_X && !autoLanding) {
+      autoLanding = true;
+      landingStartY = cy;
+    }
+
+    if (autoLanding || stopping) {
+      hold = false;
+      thrust = 0;
+    }
+
+    if (autoLanding) {
+      if (wx < FINISH_ROAD_X) {
+        // Calm open area of CALM_OPEN_GAP (300px): ease in and out toward CAR_REST_Y
+        const landT = Math.max(0, Math.min(1.0, (wx - TUNNEL_END_X) / CALM_OPEN_GAP));
+        const easeT = landT * landT * (3 - 2 * landT);
+        cy = landingStartY + (CAR_REST_Y - landingStartY) * easeT;
+        vy = 0;
+      } else {
+        // Tires touch asphalt exactly when car is above the finish road
+        cy = CAR_REST_Y;
+        vy = 0;
+      }
+    } else if (!stopping) {
+      if (hold) {
+        thrust = Math.min(1, thrust + dt / THRUST_RISE_TIME);
+      } else {
+        thrust = Math.max(0, thrust - dt / THRUST_FALL_TIME);
+      }
+
+      const vertAccel = -LIFT_ACCEL * thrust + GRAVITY * (1 - thrust);
+      vy += vertAccel * dt;
+      vy *= Math.exp(-AIR_DRAG * dt);
+      vy = Math.max(-MAX_UP_SPEED, Math.min(MAX_DOWN_SPEED, vy));
+      cy += vy * dt;
+
+      const onStartPlatform = (wx >= START_ROAD_START && wx <= START_ROAD_END);
+      if (onStartPlatform) {
+        if (!hold && cy >= CAR_REST_Y) {
+          cy = CAR_REST_Y;
+          vy = 0;
+          thrust = 0;
+        } else if (cy > CAR_REST_Y) {
+          cy = CAR_REST_Y;
+          if (vy > 0) vy = 0;
+        }
+      }
+
+      if (cy < 16) { cy = 16; vy = 0; }
+      if (cy > H - 16) { cy = H - 16; vy = 0; }
+    }
+
+    // Requirement 4: Finish Line
+    // When the finish line reaches the car's x position, level is complete:
+    // Confetti starts, score shows 100, scroll speed eases down to 0 in STOP_TIME (1.2s).
+    // Car rolls to a smooth stop on the road after the line.
+    // One second after car has stopped (STOP_TIME + 1.0s = 2.2s), show "Level N Clear!" popup.
+    if (wx >= FINISH_LINE_X && !stopping && cy >= CAR_REST_Y - 2) {
       stopping = true;
       stopTimer = 0;
       playWinSound();
+      initConfetti();
     }
 
     let ease = 1;
     if (stopping) {
       stopTimer += dt;
-      if (stopTimer <= 1.5) {
-        ease = Math.max(0, 1 - stopTimer / 1.5);
+      if (stopTimer <= STOP_TIME) {
+        ease = Math.max(0, 1 - stopTimer / STOP_TIME);
       } else {
         ease = 0;
       }
 
-      // Settle car gently on finish road surface
-      if (cy < CAR_REST_Y) {
-        cy = Math.min(CAR_REST_Y, cy + (CAR_REST_Y - cy) * Math.min(1, dt * 6));
-      } else {
-        cy = CAR_REST_Y;
-      }
+      cy = CAR_REST_Y;
       vy = 0;
       hold = false;
+      thrust = 0;
 
-      // "Level N Clear!" popup appears 1 second after the car stops (1.5s + 1.0s = 2.5s)
-      if (stopTimer >= 2.5) {
+      if (stopTimer >= STOP_TIME + 1.0) {
         st = 'level_complete';
         stopping = false;
+        autoLanding = false;
         hold = false;
         vy = 0;
         cy = CAR_REST_Y;
         levelCompleteTimer = 0;
-        initConfetti();
         levelJustCleared = curLevel;
         const nextLvl = curLevel + 1;
         const clearScore = 100 * curLevel;
         if (clearScore > best) best = clearScore;
-        // Requirement 2: Save the new level number immediately when a level is completed
-        // (when "Level N Clear!" appears, save N + 1 as the current level).
-        saveProgress(nextLvl, Math.max(highestLevel, nextLvl), best);
+        saveProgress(curLevel, Math.max(highestLevel, nextLvl), best);
       }
     }
 
-    const effectiveSp = sp * ease;
+    // Speed boost on complete road: car speeds up fast when touching down on finish road
+    let finishBoost = 1.0;
+    if (wx >= FINISH_ROAD_X || stopping) {
+      const distOnRoad = Math.max(0, wx - FINISH_ROAD_X);
+      const boostT = Math.min(1.0, distOnRoad / 100);
+      const easeT = boostT * boostT * (3 - 2 * boostT);
+      finishBoost = 1.0 + 0.95 * easeT;
+    }
+
+    const effectiveSp = sp * finishBoost * ease;
     cam += effectiveSp * dt;
 
     if (SHOW_DEBUG) {
       updateRealSpeedMeasurement(performance.now() / 1000);
     }
 
-    if (hold) {
-      thrust = Math.min(1, thrust + dt / THRUST_RISE_TIME);
-    } else {
-      thrust = Math.max(0, thrust - dt / THRUST_FALL_TIME);
-    }
-
-    const vertAccel = -LIFT_ACCEL * thrust + GRAVITY * (1 - thrust);
-    vy += vertAccel * dt;
-    vy *= Math.exp(-AIR_DRAG * dt);
-    vy = Math.max(-MAX_UP_SPEED, Math.min(MAX_DOWN_SPEED, vy));
-    cy += vy * dt;
-
     const onStartPlatform = (wx >= START_ROAD_START && wx <= START_ROAD_END);
     const onFinishPlatform = (wx >= FINISH_ROAD_X && wx <= FINISH_ROAD_END);
     const onRoadPlatform = onStartPlatform || onFinishPlatform;
 
-    if (onRoadPlatform) {
-      if (!hold && cy >= CAR_REST_Y) {
-        cy = CAR_REST_Y;
-        vy = 0;
-        thrust = 0;
-      } else if (cy > CAR_REST_Y) {
-        cy = CAR_REST_Y;
-        if (vy > 0) vy = 0;
-      }
+    // Wheel spin angular speed physics:
+    // Follows scroll speed; spins normal speed on road; slows down smoothly as car stops
+    const wheelRadiusPx = CAR_DRAW_W * WHEEL_RADIUS;
+    const targetSpinMult = (hold && !autoLanding && !stopping) ? 2.2 : 1.0;
+    if (thrustSpinMultiplier < targetSpinMult) {
+      thrustSpinMultiplier = Math.min(targetSpinMult, thrustSpinMultiplier + (1.2 / 0.08) * dt);
+    } else if (thrustSpinMultiplier > targetSpinMult) {
+      thrustSpinMultiplier = Math.max(targetSpinMult, thrustSpinMultiplier - (1.2 / 0.30) * dt);
     }
 
-    if (cy < 16) { cy = 16; vy = 0; }
-    if (cy > H - 16) { cy = H - 16; vy = 0; }
-
-    if (effectiveSp > 0) {
-      wheelRot += effectiveSp * dt * (0.16 / CAR_SCALE);
+    if (wheelRadiusPx > 0 && effectiveSp > 0) {
+      currentAngularSpeed = (effectiveSp / wheelRadiusPx) * thrustSpinMultiplier;
+    } else {
+      currentAngularSpeed = 0;
     }
 
-    if ((hold || thrust > 0.05) && st === 'play') {
+    wheelAngle += currentAngularSpeed * dt;
+    wheelRot = wheelAngle;
+
+    const isCarOnRoad = onRoadPlatform && (cy >= CAR_REST_Y - 2);
+    const isCarInAir = !isCarOnRoad;
+
+    // Requirement 2: No smoke during landing, driving on road, or stopping
+    if (hold && isCarInAir && st === 'play' && !autoLanding && !stopping) {
       const drawW = CAR_DRAW_W;
       const drawH = CAR_DRAW_H;
       const rearWheelOx = -drawW / 2 + drawW * 0.1843;
@@ -2239,7 +3165,8 @@ function step(dt) {
     }
 
     for (const s of segs) {
-      if (stopping) break;
+      // Requirement 6: Crash cannot happen after the last spike
+      if (stopping || autoLanding || wx >= TUNNEL_END_X) break;
       const curTop = (s.curTop !== undefined) ? s.curTop : s.top;
       const curBot = (s.curBot !== undefined) ? s.curBot : s.bot;
       if (wx + HITBOX_HALF_W > s.x && wx - HITBOX_HALF_W < s.x + s.w && !s.isOpen) {
@@ -2260,12 +3187,17 @@ function step(dt) {
         if (hit) { die(); break; }
       }
     }
+    if (stopping) {
+      updateConfetti(dt);
+    }
   } else if (st === 'level_complete') {
     levelCompleteTimer += dt;
     cy = CAR_REST_Y;
     vy = 0;
     updateConfetti(dt);
   }
+
+  updateThrustAudio(dt);
 
   for (const p of parts) { p.l += dt; p.x += p.vx * dt; p.y += p.vy * dt; }
   parts = parts.filter(p => p.l < p.m);
@@ -2361,13 +3293,33 @@ function drawLoadingScreen() {
       ctx.shadowBlur = 0;
       ctx.shadowOffsetY = 0;
 
-      const loadRearX = -loadW / 2 + loadW * 0.1843;
-      const loadFrontX = -loadW / 2 + loadW * 0.8190;
-      const loadWheelY = -loadH / 2 + loadH * 0.7026;
-      const loadWheelR = loadH * 0.2908;
+      if (wheelSpritesReady && rearWheelSprite && frontWheelSprite) {
+        const loadRearX = -loadW / 2 + loadW * WHEEL_REAR_X;
+        const loadFrontX = -loadW / 2 + loadW * WHEEL_FRONT_X;
+        const loadWheelY = -loadH / 2 + loadH * WHEEL_Y;
+        const loadWheelR = loadW * WHEEL_RADIUS;
+        const loadWheelD = loadWheelR * 2;
 
-      drawSportsWheel(loadRearX, loadWheelY, loadWheelR, loadingWheelRot);
-      drawSportsWheel(loadFrontX, loadWheelY, loadWheelR, loadingWheelRot);
+        ctx.save();
+        ctx.translate(loadRearX, loadWheelY);
+        ctx.rotate(loadingWheelRot);
+        ctx.drawImage(rearWheelSprite, -loadWheelR, -loadWheelR, loadWheelD, loadWheelD);
+        ctx.restore();
+
+        ctx.save();
+        ctx.translate(loadFrontX, loadWheelY);
+        ctx.rotate(loadingWheelRot);
+        ctx.drawImage(frontWheelSprite, -loadWheelR, -loadWheelR, loadWheelD, loadWheelD);
+        ctx.restore();
+      } else {
+        const loadRearX = -loadW / 2 + loadW * 0.1843;
+        const loadFrontX = -loadW / 2 + loadW * 0.8190;
+        const loadWheelY = -loadH / 2 + loadH * 0.7026;
+        const loadWheelR = loadH * 0.2908;
+
+        drawSportsWheel(loadRearX, loadWheelY, loadWheelR, loadingWheelRot);
+        drawSportsWheel(loadFrontX, loadWheelY, loadWheelR, loadingWheelRot);
+      }
     } else {
       ctx.scale(carScale, carScale);
       renderCarBody(loadingWheelRot);
@@ -2463,7 +3415,7 @@ function drawDebugOverlay() {
 function drawHUD() {
   const cfg = curConfig;
   const progress = getLevelProgress();
-  const curScore = Math.floor(progress * 100);
+  const curScore = (stopping || st === 'level_complete' || progress >= 1.0) ? 100 : Math.floor(progress * 100);
   const currentTotal = 100 * (curLevel - 1) + curScore;
   if (currentTotal > best) {
     best = currentTotal;
@@ -2522,8 +3474,8 @@ function drawSettingsPopup() {
   ctx.fillStyle = 'rgba(10, 15, 25, 0.65)';
   ctx.fillRect(0, 0, W, H);
 
-  const cw = 290, ch = 310;
-  const cx = W / 2 - cw / 2, cy = H / 2 - ch / 2 - 15;
+  const cw = 290, ch = 412;
+  const cx = W / 2 - cw / 2, cy = H / 2 - ch / 2 - 10;
 
   ctx.shadowColor = 'rgba(0, 0, 0, 0.35)';
   ctx.shadowBlur = 18;
@@ -2548,38 +3500,90 @@ function drawSettingsPopup() {
   const isXPressed = (activePress === 'close_settings');
   drawRoundGlossyButton(cx + cw - 12, cy + 12, 17, BUTTON_THEMES.red, 'close', isXPressed);
 
-  const soundBtnX = cx + 26, soundBtnY = cy + 58, btnSz = 105;
+  const soundBtnX = cx + 24, soundBtnY = cy + 46, btnSz = 104;
   const isSoundPressed = (activePress === 'toggle_sound');
   const soundTheme = soundEnabled ? BUTTON_THEMES.green : BUTTON_THEMES.gray;
   drawGlossyButton(soundBtnX, soundBtnY, btnSz, btnSz, soundTheme, null, soundEnabled ? 'sound_on' : 'sound_off', isSoundPressed, 18);
   drawGlossyText('SOUND', soundBtnX + btnSz / 2, soundBtnY + 22, 15, 'center', '#ffffff', soundTheme.border, 3);
   drawGlossyText(soundEnabled ? 'ON' : 'OFF', soundBtnX + btnSz / 2, soundBtnY + btnSz - 22, 17, 'center', soundEnabled ? '#ffffff' : '#cbd5e1', soundTheme.border, 3.8);
 
-  const vibBtnX = cx + cw - 26 - btnSz, vibBtnY = cy + 58;
+  const vibBtnX = cx + cw - 24 - btnSz, vibBtnY = cy + 46;
   const isVibPressed = (activePress === 'toggle_vibrate');
   const vibTheme = vibrateEnabled ? BUTTON_THEMES.green : BUTTON_THEMES.gray;
   drawGlossyButton(vibBtnX, vibBtnY, btnSz, btnSz, vibTheme, null, vibrateEnabled ? 'vibrate_on' : 'vibrate_off', isVibPressed, 18);
   drawGlossyText('HAPTICS', vibBtnX + btnSz / 2, vibBtnY + 22, 15, 'center', '#ffffff', vibTheme.border, 3);
   drawGlossyText(vibrateEnabled ? 'ON' : 'OFF', vibBtnX + btnSz / 2, vibBtnY + btnSz - 22, 17, 'center', vibrateEnabled ? '#ffffff' : '#cbd5e1', vibTheme.border, 3.8);
 
+  // START LEVEL STEPPER
+  const stepCardX = cx + 20, stepCardY = cy + 158, stepCardW = cw - 40, stepCardH = 54;
+  ctx.save();
+  ctx.fillStyle = '#f1f5f9';
+  roundRect(ctx, stepCardX, stepCardY, stepCardW, stepCardH, 14);
+  ctx.fill();
+  ctx.strokeStyle = '#cbd5e1';
+  ctx.lineWidth = 1.5;
+  roundRect(ctx, stepCardX, stepCardY, stepCardW, stepCardH, 14);
+  ctx.stroke();
+  ctx.restore();
+
+  const isMinusPressed = (activePress === 'dec_start_level');
+  const canDec = curLevel > 1;
+  const minusTheme = canDec ? BUTTON_THEMES.blue : BUTTON_THEMES.gray;
+  drawGlossyButton(stepCardX + 6, stepCardY + 7, 40, 40, minusTheme, '−', null, isMinusPressed, 12);
+
+  drawGlossyText('START LEVEL', stepCardX + stepCardW / 2, stepCardY + 16, 11, 'center', '#64748b', '#0f172a', 2.0);
+  drawGlossyText('Level ' + curLevel, stepCardX + stepCardW / 2, stepCardY + 39, 19, 'center', '#0f172a', '#ffffff', 2.8);
+
+  const isPlusPressed = (activePress === 'inc_start_level');
+  const canInc = curLevel < highestLevel;
+  const plusTheme = canInc ? BUTTON_THEMES.blue : BUTTON_THEMES.gray;
+  drawGlossyButton(stepCardX + stepCardW - 6 - 40, stepCardY + 7, 40, 40, plusTheme, '+', null, isPlusPressed, 12);
+
+  // ALLOY RIM CUSTOMIZER CARD
+  const rimCardX = cx + 20, rimCardY = cy + 220, rimCardW = cw - 40, rimCardH = 54;
+  const isRimPressed = (activePress === 'cycle_rim_style');
+  ctx.save();
+  ctx.fillStyle = isRimPressed ? '#e2e8f0' : '#f1f5f9';
+  roundRect(ctx, rimCardX, rimCardY, rimCardW, rimCardH, 14);
+  ctx.fill();
+  ctx.strokeStyle = '#cbd5e1';
+  ctx.lineWidth = 1.5;
+  roundRect(ctx, rimCardX, rimCardY, rimCardW, rimCardH, 14);
+  ctx.stroke();
+
+  // Mini wheel icon on left
+  drawButtonIcon('wheel', rimCardX + 26, rimCardY + 27, 34);
+
+  // Rim name & label
+  const curRimCfg = RIM_STYLE_CONFIGS[currentRimStyle] || RIM_STYLE_CONFIGS.silver_sport;
+  drawGlossyText('ALLOY RIM', rimCardX + 54, rimCardY + 16, 11, 'left', '#64748b', '#0f172a', 2.0);
+  drawGlossyText(curRimCfg.name, rimCardX + 54, rimCardY + 39, 16, 'left', '#0f172a', '#ffffff', 2.6);
+
+  // Switch pill button on right
+  const pillW = 66, pillH = 34;
+  drawGlossyButton(rimCardX + rimCardW - pillW - 8, rimCardY + 10, pillW, pillH, BUTTON_THEMES.purple, 'CHANGE', null, isRimPressed, 10);
+  ctx.restore();
+
+  // Reset Progress Section
   if (!resetConfirming) {
-    const rBtnW = 176, rBtnH = 38;
-    const rBtnX = cx + (cw - rBtnW) / 2, rBtnY = cy + 180;
+    const rBtnW = 168, rBtnH = 34;
+    const rBtnX = cx + (cw - rBtnW) / 2, rBtnY = cy + 288;
     const isResetPressed = (activePress === 'ask_reset_progress');
-    drawGlossyButton(rBtnX, rBtnY, rBtnW, rBtnH, BUTTON_THEMES.red, 'Reset progress', null, isResetPressed, 14);
-    drawGlossyText('Tap toggles to switch', W / 2, cy + ch - 18, 12.5, 'center', '#64748b', '#0f172a', 2.5);
+    drawGlossyButton(rBtnX, rBtnY, rBtnW, rBtnH, BUTTON_THEMES.red, 'Reset progress', null, isResetPressed, 13);
+    const maxHint = (highestLevel > 1) ? `Highest unlocked: Level ${highestLevel}` : 'Tap CHANGE to switch rims';
+    drawGlossyText(maxHint, W / 2, cy + ch - 16, 11.5, 'center', '#64748b', '#0f172a', 2.2);
   } else {
-    drawGlossyText('Are you sure?', W / 2, cy + 180, 16, 'center', '#ef4444', '#450a0a', 3.5);
-    const confH = 36;
-    const yesW = 102, yesX = cx + 28, yesY = cy + 204;
+    drawGlossyText('Are you sure?', W / 2, cy + 284, 15, 'center', '#ef4444', '#450a0a', 3.5);
+    const confH = 34;
+    const yesW = 98, yesX = cx + 32, yesY = cy + 306;
     const isYesPressed = (activePress === 'confirm_reset_progress');
-    drawGlossyButton(yesX, yesY, yesW, confH, BUTTON_THEMES.red, 'Yes, reset', null, isYesPressed, 13);
+    drawGlossyButton(yesX, yesY, yesW, confH, BUTTON_THEMES.red, 'Yes, reset', null, isYesPressed, 12);
 
-    const noW = 102, noX = cx + cw - 28 - noW, noY = cy + 204;
+    const noW = 98, noX = cx + cw - 32 - noW, noY = cy + 306;
     const isNoPressed = (activePress === 'cancel_reset_progress');
-    drawGlossyButton(noX, noY, noW, confH, BUTTON_THEMES.gray, 'Cancel', null, isNoPressed, 13);
+    drawGlossyButton(noX, noY, noW, confH, BUTTON_THEMES.gray, 'Cancel', null, isNoPressed, 12);
 
-    drawGlossyText('Resets level progress to 1', W / 2, cy + ch - 16, 11.5, 'center', '#94a3b8', '#0f172a', 2.2);
+    drawGlossyText('Resets level progress to 1', W / 2, cy + ch - 14, 11, 'center', '#94a3b8', '#0f172a', 2.0);
   }
 
   ctx.restore();
@@ -2629,7 +3633,7 @@ function drawLevelCompletePopup() {
 
   const btnW = 210, btnH = 54;
   const isNextPressed = (activePress === 'next_level');
-  drawGlossyButton(W / 2 - btnW / 2, cy + ch - 72, btnW, btnH, BUTTON_THEMES.green, 'NEXT LEVEL', null, isNextPressed, 27);
+  drawGlossyButton(W / 2 - btnW / 2, cy + ch - 72, btnW, btnH, BUTTON_THEMES.green, `START LEVEL ${lvlNum + 1}`, null, isNextPressed, 24);
 
   ctx.restore();
 }
@@ -2675,7 +3679,7 @@ function drawCrashPopup() {
 
   const btnW = 210, btnH = 54;
   const isTryPressed = (activePress === 'try_again');
-  drawGlossyButton(W / 2 - btnW / 2, cy + ch - 72, btnW, btnH, BUTTON_THEMES.orange, 'TRY AGAIN', null, isTryPressed, 27);
+  drawGlossyButton(W / 2 - btnW / 2, cy + ch - 72, btnW, btnH, BUTTON_THEMES.orange, `RETRY LEVEL ${curLevel}`, null, isTryPressed, 24);
 
   ctx.restore();
 }
@@ -2686,13 +3690,48 @@ function drawGameContent() {
   // 1. Picture background (or fallback procedural)
   drawBackground();
 
-  // 2. Starting Road Platform
+  // 2. Wheel thruster smoke (behind road and car; never drawn on top of road or truss)
+  const sRoadX1 = START_ROAD_START - cam - 20;
+  const sRoadX2 = START_ROAD_END - cam + 20;
+  const fRoadX1 = FINISH_ROAD_X - cam - 20;
+  const fRoadX2 = FINISH_ROAD_END - cam + 20;
+
+  for (const p of parts) {
+    const k = 1 - p.l / p.m;
+    if (k <= 0) continue;
+    const r = p.size * (1 + 0.3 * (1 - k));
+
+    // Exclude any smoke from being drawn on top of the road or truss
+    const overRoad = (p.x + r >= sRoadX1 && p.x - r <= sRoadX2) || (p.x + r >= fRoadX1 && p.x - r <= fRoadX2);
+    if (overRoad && p.y + r >= ROAD_TOP - 2) {
+      if (p.y - r >= ROAD_TOP - 2) continue;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, W, ROAD_TOP - 2);
+      ctx.clip();
+      ctx.globalAlpha = 0.7 * k;
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, 6.28);
+      ctx.fill();
+      ctx.restore();
+    } else {
+      ctx.globalAlpha = 0.7 * k;
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, 6.28);
+      ctx.fill();
+    }
+  }
+  ctx.globalAlpha = 1;
+
+  // 3. Starting Road Platform
   drawRoadPlatform(START_ROAD_START, START_ROAD_END, ROAD_TOP);
 
-  // 3. Finish Road Platform
+  // 4. Finish Road Platform
   drawRoadPlatform(FINISH_ROAD_X, FINISH_ROAD_END, ROAD_TOP, true);
 
-  // 4. Spikes & Studded Rails with continuous connected rail pieces
+  // 5. Spikes & Studded Rails with continuous connected rail pieces
   for (let i = 0; i < segs.length; i++) {
     const s = segs[i];
     const x = s.x - cam;
@@ -2731,7 +3770,7 @@ function drawGameContent() {
     }
   }
 
-  // 5. Sky Car (thin dark outline + soft shadow)
+  // 6. Sky Car (thin dark outline + soft shadow)
   if (st === 'ready') {
     const menuAlpha = Math.min(1, menuFadeTimer / 0.3);
     ctx.save();
@@ -2742,19 +3781,11 @@ function drawGameContent() {
     car(CAR_X);
   }
 
-  // 6. Wheel thruster smoke
-  for (const p of parts) {
-    const k = 1 - p.l / p.m;
-    ctx.globalAlpha = 0.7 * k;
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, p.size * (1 + 0.3 * (1 - k)), 0, 6.28);
-    ctx.fill();
-  }
-  ctx.globalAlpha = 1;
-
   // 7. UI and Screens (all HUD text in white with dark outline)
   if (st === 'play') {
+    if (stopping) {
+      drawConfetti();
+    }
     drawHUD();
     if (SHOW_DEBUG) {
       drawDebugOverlay();
@@ -2763,13 +3794,22 @@ function drawGameContent() {
   } else if (st === 'transition') {
     drawHUD();
     let cardAlpha = 1;
-    if (transitionTimer < 0.4) cardAlpha = transitionTimer / 0.4;
-    else if (transitionTimer > 1.4) cardAlpha = Math.max(0, 1 - (transitionTimer - 1.4) / 0.35);
+    if (transitionTimer < 0.35) cardAlpha = transitionTimer / 0.35;
+    else if (transitionTimer > 1.35) cardAlpha = Math.max(0, 1 - (transitionTimer - 1.35) / 0.4);
 
     ctx.save();
     ctx.globalAlpha = cardAlpha;
-    drawRibbonHeader(W / 2, 210 + topInset * 0.5, 270, 48, `LEVEL ${curLevel}: ${cfg.name.toUpperCase()}`, BUTTON_THEMES.blue, 2);
+    const cardText = getLevelDisplayText(curLevel, cfg);
+    const ribbonW = hasRealScenePicture(curLevel, cfg) ? 270 : 210;
+    drawRibbonHeader(W / 2, 210 + topInset * 0.5, ribbonW, 48, cardText, BUTTON_THEMES.blue, 2);
     ctx.restore();
+
+    if (transitionTimer < 0.25) {
+      ctx.save();
+      ctx.fillStyle = `rgba(0, 0, 0, ${Math.max(0, 1 - transitionTimer / 0.25)})`;
+      ctx.fillRect(0, 0, W, H);
+      ctx.restore();
+    }
 
   } else if (st === 'ready') {
     const menuAlpha = Math.min(1, menuFadeTimer / 0.3);
@@ -2781,7 +3821,8 @@ function drawGameContent() {
 
     // Title Logo
     drawGlossyText('THORN RUSH', W / 2, 120 + topInset * 0.6, 46, 'center', '#ffffff', '#0f172a', 8);
-    drawGlossyText(`${cfg.name.toUpperCase()}`, W / 2, 165 + topInset * 0.6, 18, 'center', '#ffffff', '#0f172a', 4.5);
+    const menuLevelText = getLevelDisplayText(curLevel, cfg);
+    drawGlossyText(menuLevelText, W / 2, 165 + topInset * 0.6, 18, 'center', '#ffffff', '#0f172a', 4.5);
 
     // Bottom Row: moved up by botInset
     const btnY = H - 70 - botInset;
@@ -2794,7 +3835,7 @@ function drawGameContent() {
     drawGlossyButton(96, playY, 168, 56, BUTTON_THEMES.green, `LEVEL ${curLevel}`, null, isLevelPressed, 28);
 
     const isCarPressed = (activePress === 'car_garage');
-    drawRoundGlossyButton(308, btnY, 26, BUTTON_THEMES.purple, 'car', isCarPressed);
+    drawRoundGlossyButton(308, btnY, 26, BUTTON_THEMES.purple, 'wheel', isCarPressed);
 
     ctx.restore();
 
@@ -2888,39 +3929,61 @@ function handlePointerDown(e) {
   if (st === 'loading') return;
 
   if (settingsOpen) {
-    const cw = 290, ch = 310;
-    const cx = W / 2 - cw / 2, cy = H / 2 - ch / 2 - 15;
+    const cw = 290, ch = 356;
+    const cx = W / 2 - cw / 2, cy = H / 2 - ch / 2 - 10;
 
     if (inCircle(x, y, cx + cw - 12, cy + 12, 24)) {
       activePress = 'close_settings';
       return;
     }
-    const soundBtnX = cx + 26, soundBtnY = cy + 58, btnSz = 105;
+    const soundBtnX = cx + 24, soundBtnY = cy + 50, btnSz = 104;
     if (inBox(x, y, soundBtnX, soundBtnY, btnSz, btnSz)) {
       activePress = 'toggle_sound';
       return;
     }
-    const vibBtnX = cx + cw - 26 - btnSz, vibBtnY = cy + 58;
+    const vibBtnX = cx + cw - 24 - btnSz, vibBtnY = cy + 50;
     if (inBox(x, y, vibBtnX, vibBtnY, btnSz, btnSz)) {
       activePress = 'toggle_vibrate';
       return;
     }
 
+    // Stepper minus & plus buttons
+    const stepCardX = cx + 20, stepCardY = cy + 158, stepCardW = cw - 40, stepCardH = 54;
+    if (inBox(x, y, stepCardX + 2, stepCardY + 2, 48, 50)) {
+      if (curLevel > 1) {
+        activePress = 'dec_start_level';
+        return;
+      }
+    }
+    if (inBox(x, y, stepCardX + stepCardW - 50, stepCardY + 2, 48, 50)) {
+      if (curLevel < highestLevel) {
+        activePress = 'inc_start_level';
+        return;
+      }
+    }
+
+    // Alloy Rim customizer card
+    const rimCardX = cx + 20, rimCardY = cy + 220, rimCardW = cw - 40, rimCardH = 54;
+    if (inBox(x, y, rimCardX, rimCardY, rimCardW, rimCardH)) {
+      activePress = 'cycle_rim_style';
+      return;
+    }
+
     if (!resetConfirming) {
-      const rBtnW = 176, rBtnH = 38;
-      const rBtnX = cx + (cw - rBtnW) / 2, rBtnY = cy + 180;
+      const rBtnW = 168, rBtnH = 34;
+      const rBtnX = cx + (cw - rBtnW) / 2, rBtnY = cy + 288;
       if (inBox(x, y, rBtnX, rBtnY, rBtnW, rBtnH)) {
         activePress = 'ask_reset_progress';
         return;
       }
     } else {
-      const confH = 36;
-      const yesW = 102, yesX = cx + 28, yesY = cy + 204;
+      const confH = 34;
+      const yesW = 98, yesX = cx + 32, yesY = cy + 306;
       if (inBox(x, y, yesX, yesY, yesW, confH)) {
         activePress = 'confirm_reset_progress';
         return;
       }
-      const noW = 102, noX = cx + cw - 28 - noW, noY = cy + 204;
+      const noW = 98, noX = cx + cw - 32 - noW, noY = cy + 306;
       if (inBox(x, y, noX, noY, noW, confH)) {
         activePress = 'cancel_reset_progress';
         return;
@@ -2945,10 +4008,15 @@ function handlePointerDown(e) {
       activePress = 'car_garage';
       return;
     }
+    startLevel(curLevel);
     st = 'play';
     hold = true;
     activePress = 'start_level';
     playClickSound();
+    return;
+  }
+
+  if (st === 'transition') {
     return;
   }
 
@@ -2991,7 +4059,9 @@ function handlePointerDown(e) {
   }
 
   if (st === 'play') {
-    hold = true;
+    if (!autoLanding && !stopping) {
+      hold = true;
+    }
   }
 }
 
@@ -3024,25 +4094,44 @@ function handlePointerUp(e) {
     } else if (activePress === 'open_settings') {
       settingsOpen = true;
       resetConfirming = false;
+    } else if (activePress === 'dec_start_level') {
+      if (curLevel > 1) {
+        curLevel--;
+        saveProgress(curLevel, highestLevel, best);
+        startLevel(curLevel);
+        triggerVibrate(25);
+        showToast('Level ' + curLevel);
+      }
+    } else if (activePress === 'inc_start_level') {
+      if (curLevel < highestLevel) {
+        curLevel++;
+        saveProgress(curLevel, highestLevel, best);
+        startLevel(curLevel);
+        triggerVibrate(25);
+        showToast('Level ' + curLevel);
+      }
     } else if (activePress === 'start_level') {
       // Game already started on pointerdown
-    } else if (activePress === 'car_garage') {
-      showToast('Coming soon');
+    } else if (activePress === 'car_garage' || activePress === 'cycle_rim_style') {
+      cycleAlloyRimStyle();
     } else if (activePress === 'next_level') {
-      nextLevelTarget = curLevel;
-      st = 'transition';
-      transitionTimer = 0;
-      hold = false;
-      saveProgress(curLevel, highestLevel, best);
+      advanceToNextLevel();
     } else if (activePress === 'close_complete') {
+      const nextLvl = (levelJustCleared ? levelJustCleared + 1 : curLevel + 1);
+      curLevel = nextLvl;
+      saveProgress(curLevel, Math.max(highestLevel, curLevel), best);
       startLevel(curLevel);
       st = 'ready';
       hold = false;
     } else if (activePress === 'try_again') {
+      const restartLvl = RETRY_FROM_LEVEL_START ? curLevel : 1;
+      curLevel = restartLvl;
       startLevel(curLevel);
-      st = 'ready';
+      st = 'play';
       hold = false;
     } else if (activePress === 'close_dead') {
+      const restartLvl = RETRY_FROM_LEVEL_START ? curLevel : 1;
+      curLevel = restartLvl;
       startLevel(curLevel);
       st = 'ready';
       hold = false;
@@ -3052,7 +4141,7 @@ function handlePointerUp(e) {
   }
 }
 
-cv.addEventListener('pointerdown', e => { e.preventDefault(); handlePointerDown(e); });
+cv.addEventListener('pointerdown', e => { e.preventDefault(); ensureAudioContext(); handlePointerDown(e); });
 window.addEventListener('pointerup', e => { e.preventDefault(); handlePointerUp(e); });
 window.addEventListener('pointercancel', () => { hold = false; activePress = null; });
 window.addEventListener('blur', () => { hold = false; activePress = null; });
@@ -3061,12 +4150,17 @@ document.addEventListener('visibilitychange', () => { hold = false; activePress 
 window.addEventListener('keydown', e => {
   if (e.code === 'Space') {
     e.preventDefault();
+    ensureAudioContext();
     if (!e.repeat) {
-      if (st === 'ready') { st = 'play'; hold = true; }
-      else if (st === 'play') { hold = true; }
-      else if (st === 'dead' && performance.now() - deadAt > 350) { startLevel(curLevel); st = 'ready'; }
+      if (st === 'ready') { startLevel(curLevel); st = 'play'; hold = true; }
+      else if (st === 'play') {
+        if (!autoLanding && !stopping) {
+          hold = true;
+        }
+      }
+      else if (st === 'dead' && performance.now() - deadAt > 350) { startLevel(curLevel); st = 'play'; }
       else if (st === 'level_complete' && levelCompleteTimer >= 0.8) {
-        nextLevelTarget = curLevel; st = 'transition'; transitionTimer = 0;
+        advanceToNextLevel();
       }
     }
   }
