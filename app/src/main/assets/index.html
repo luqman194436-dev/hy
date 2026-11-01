@@ -171,8 +171,62 @@ function getLevelTitleCardText(level) {
 }
 
 // ==========================================
-// TUNING CONSTANTS (Scale, Speed, Physics, SFX)
+// TUNING CONSTANTS (Scale, Speed, Physics, SFX, Collectibles)
 // ==========================================
+const SPEED_NORMAL = 1.0;
+const SPEED_FAST = 1.7;
+const SPEED_TURBO = 2.3;
+const WIND_VOLUME = 0.12;
+
+// Collectible Coins & Gems
+const COIN_VALUE = 1;
+const GEM_VALUE = 5;
+const COIN_RADIUS = 0.30 * 48;       // 14.4 px (0.30 * carH)
+const PICKUP_RADIUS = 0.95 * 48;     // 45.6 px (generous from car center)
+const COINS_PER_LEVEL = 90;
+const GEM_RADIUS = 0.38 * 48;        // 18.24 px (0.38 * carH)
+
+const COIN_STORAGE_KEY = 'thornRushCoins';
+let wallet = 0;
+let levelCoinsCollected = 0;
+let coinCounterBump = 1.0;
+let coinCombo = 0;
+let coinComboTimer = 0;
+
+function loadWallet() {
+  try {
+    const saved = localStorage.getItem(COIN_STORAGE_KEY);
+    if (saved !== null) {
+      const v = parseInt(saved, 10);
+      if (!isNaN(v) && v >= 0) wallet = v;
+    }
+  } catch(e) {}
+}
+
+function saveWallet() {
+  try {
+    localStorage.setItem(COIN_STORAGE_KEY, String(wallet));
+  } catch(e) {}
+}
+
+let speedMode = 'fast'; // 'normal' | 'fast' | 'turbo'
+const SPEED_STORAGE_KEY = 'thornRushSpeedMode';
+
+function getSpeedMultiplier() {
+  if (speedMode === 'normal') return SPEED_NORMAL;
+  if (speedMode === 'turbo') return SPEED_TURBO;
+  return SPEED_FAST;
+}
+
+function loadSpeedSetting() {
+  try {
+    const saved = localStorage.getItem(SPEED_STORAGE_KEY);
+    if (saved === 'normal' || saved === 'fast' || saved === 'turbo') {
+      speedMode = saved;
+    }
+  } catch(e) {}
+}
+
 const SFX_VOLUME = 0.8;
 const PUFF_INTERVAL = 0.2;
 
@@ -194,11 +248,38 @@ const HITBOX_TOP_OFFSET = 9 * CAR_SCALE;
 const HITBOX_BOT_OFFSET = 11 * CAR_SCALE;
 const CAR_HITBOX_H = HITBOX_TOP_OFFSET + HITBOX_BOT_OFFSET; // 40px
 
-// Vertical Handling in canvas-height units (H = canvas height)
-let LIFT_ACCEL = 0.65 * H * VERTICAL_RESPONSE;
-let GRAVITY = 0.40 * H * VERTICAL_RESPONSE;
-let MAX_UP_SPEED = 0.15 * H * VERTICAL_RESPONSE;
-let MAX_DOWN_SPEED = 0.13 * H * VERTICAL_RESPONSE;
+// Base vertical handling in canvas-height units (H = canvas height)
+let BASE_LIFT_ACCEL = 0.65 * H * VERTICAL_RESPONSE;
+let BASE_GRAVITY = 0.40 * H * VERTICAL_RESPONSE;
+let BASE_MAX_UP_SPEED = 0.15 * H * VERTICAL_RESPONSE;
+let BASE_MAX_DOWN_SPEED = 0.13 * H * VERTICAL_RESPONSE;
+
+let LIFT_ACCEL = BASE_LIFT_ACCEL;
+let GRAVITY = BASE_GRAVITY;
+let MAX_UP_SPEED = BASE_MAX_UP_SPEED;
+let MAX_DOWN_SPEED = BASE_MAX_DOWN_SPEED;
+
+function updateSpeedPhysics() {
+  BASE_LIFT_ACCEL = 0.65 * H * VERTICAL_RESPONSE;
+  BASE_GRAVITY = 0.40 * H * VERTICAL_RESPONSE;
+  BASE_MAX_UP_SPEED = 0.15 * H * VERTICAL_RESPONSE;
+  BASE_MAX_DOWN_SPEED = 0.13 * H * VERTICAL_RESPONSE;
+
+  const mult = getSpeedMultiplier();
+  const handleScale = Math.pow(mult, 0.6);
+  LIFT_ACCEL = BASE_LIFT_ACCEL * handleScale;
+  GRAVITY = BASE_GRAVITY * handleScale;
+  MAX_UP_SPEED = BASE_MAX_UP_SPEED * handleScale;
+  MAX_DOWN_SPEED = BASE_MAX_DOWN_SPEED * handleScale;
+}
+
+function setSpeedMode(mode) {
+  speedMode = mode;
+  try {
+    localStorage.setItem(SPEED_STORAGE_KEY, mode);
+  } catch(e) {}
+  updateSpeedPhysics();
+}
 
 const ROAD_LANE_H = 36;
 let ROAD_TOP = 400;
@@ -254,7 +335,8 @@ const LEVEL_MAX_EXTRA = 8;
 function getTunnelLength(lvl) {
   const L = lvl || 1;
   const extra = Math.min(LEVEL_MAX_EXTRA, LEVEL_GROWTH * (L - 1));
-  return Math.round((LEVEL_BASE_WIDTHS + extra) * W);
+  const mult = getSpeedMultiplier();
+  return Math.round((LEVEL_BASE_WIDTHS + extra) * W * mult);
 }
 
 let TUNNEL_LENGTH = getTunnelLength(1);
@@ -952,6 +1034,9 @@ function ensureAudioContext() {
     if (audioCtx && !gasPuffAudioBuffer && !isPuffDecoding) {
       decodeGasPuffAudio();
     }
+    if (audioCtx && !windSource) {
+      initWindSound();
+    }
   } catch(e) {}
 }
 
@@ -1435,25 +1520,1333 @@ function prerenderSpikes(cfg) {
   }
 }
 
-function prerenderFallbackScene(cfg) {
-  if (!fallbackBgCanvas) {
-    fallbackBgCanvas = document.createElement('canvas');
-    fallbackBgCanvas.width = W;
-    fallbackBgCanvas.height = H;
-  }
-  const bgCtx = fallbackBgCanvas.getContext('2d');
-  const grad = bgCtx.createLinearGradient(0, 0, 0, H);
-  grad.addColorStop(0, cfg.bgTop);
-  grad.addColorStop(1, cfg.bgBot);
-  bgCtx.fillStyle = grad;
-  bgCtx.fillRect(0, 0, W, H);
+// ==========================================
+// CINEMATIC STAGE BACKGROUNDS & PARALLAX SILHOUETTES
+// ==========================================
+const stageBgCanvases = [];
+let currentBgStage = 1;
+let prevBgStage = 1;
+let bgCrossFadeTimer = 0;
+let vignetteCanvas = null;
 
-  // Soft sunlight highlight
-  const sunGrad = bgCtx.createRadialGradient(W * 0.75, H * 0.15, 10, W * 0.75, H * 0.15, W * 0.6);
-  sunGrad.addColorStop(0, 'rgba(255, 255, 255, 0.45)');
-  sunGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
-  bgCtx.fillStyle = sunGrad;
-  bgCtx.fillRect(0, 0, W, H);
+function prerenderVignette() {
+  if (!vignetteCanvas) {
+    vignetteCanvas = document.createElement('canvas');
+  }
+  vignetteCanvas.width = W;
+  vignetteCanvas.height = H;
+  const vCtx = vignetteCanvas.getContext('2d');
+  const vg = vCtx.createRadialGradient(W / 2, H / 2, W * 0.40, W / 2, H / 2, H * 0.72);
+  vg.addColorStop(0, 'rgba(0, 0, 0, 0)');
+  vg.addColorStop(0.70, 'rgba(0, 0, 0, 0.12)');
+  vg.addColorStop(1, 'rgba(0, 0, 0, 0.32)');
+  vCtx.fillStyle = vg;
+  vCtx.fillRect(0, 0, W, H);
+}
+
+function drawMesasAndArches(sCtx, unitW, H, layer, stage) {
+  // Desert Highway: mesas and rock arches
+  sCtx.save();
+  if (layer === 'far') {
+    sCtx.fillStyle = 'rgba(122, 46, 26, 0.35)';
+    sCtx.beginPath();
+    sCtx.moveTo(0, H);
+    sCtx.lineTo(0, H * 0.48);
+    sCtx.lineTo(unitW * 0.12, H * 0.48);
+    sCtx.lineTo(unitW * 0.18, H * 0.55);
+    sCtx.lineTo(unitW * 0.32, H * 0.55);
+    sCtx.lineTo(unitW * 0.38, H * 0.44);
+    sCtx.lineTo(unitW * 0.54, H * 0.44);
+    sCtx.lineTo(unitW * 0.60, H * 0.54);
+    sCtx.lineTo(unitW * 0.74, H * 0.54);
+    sCtx.lineTo(unitW * 0.80, H * 0.46);
+    sCtx.lineTo(unitW * 0.92, H * 0.46);
+    sCtx.lineTo(unitW, H * 0.48);
+    sCtx.lineTo(unitW, H);
+    sCtx.closePath();
+    sCtx.fill();
+  } else if (layer === 'mid') {
+    sCtx.fillStyle = 'rgba(85, 30, 18, 0.65)';
+    sCtx.beginPath();
+    sCtx.moveTo(0, H);
+    sCtx.lineTo(0, H * 0.62);
+    sCtx.lineTo(unitW * 0.08, H * 0.62);
+    sCtx.lineTo(unitW * 0.14, H * 0.52);
+    sCtx.lineTo(unitW * 0.22, H * 0.52);
+    sCtx.lineTo(unitW * 0.26, H * 0.64);
+    sCtx.lineTo(unitW * 0.44, H * 0.64);
+    sCtx.lineTo(unitW * 0.48, H * 0.48);
+    sCtx.lineTo(unitW * 0.54, H * 0.48);
+    sCtx.lineTo(unitW * 0.58, H * 0.65);
+    sCtx.lineTo(unitW * 0.70, H * 0.65);
+    sCtx.lineTo(unitW * 0.76, H * 0.55);
+    sCtx.lineTo(unitW * 0.86, H * 0.55);
+    sCtx.lineTo(unitW * 0.92, H * 0.62);
+    sCtx.lineTo(unitW, H * 0.62);
+    sCtx.lineTo(unitW, H);
+    sCtx.closePath();
+    sCtx.fill();
+  } else {
+    // Near: rock arches and sharp crags
+    sCtx.fillStyle = 'rgba(45, 16, 10, 0.95)';
+    sCtx.beginPath();
+    sCtx.moveTo(0, H);
+    sCtx.lineTo(0, H * 0.72);
+    sCtx.lineTo(unitW * 0.15, H * 0.72);
+    sCtx.bezierCurveTo(unitW * 0.24, H * 0.44, unitW * 0.42, H * 0.44, unitW * 0.52, H * 0.74);
+    sCtx.lineTo(unitW * 0.64, H * 0.74);
+    sCtx.lineTo(unitW * 0.70, H * 0.64);
+    sCtx.lineTo(unitW * 0.84, H * 0.64);
+    sCtx.lineTo(unitW * 0.92, H * 0.72);
+    sCtx.lineTo(unitW, H * 0.72);
+    sCtx.lineTo(unitW, H);
+    sCtx.closePath();
+    sCtx.fill();
+    // Cutout under natural arch
+    sCtx.save();
+    sCtx.globalCompositeOperation = 'destination-out';
+    sCtx.beginPath();
+    sCtx.ellipse(unitW * 0.38, H * 0.68, unitW * 0.08, H * 0.14, 0, 0, Math.PI * 2);
+    sCtx.fill();
+    sCtx.restore();
+  }
+  sCtx.restore();
+}
+
+function drawSkyscrapersWithNeon(sCtx, unitW, H, layer, stage) {
+  // Neon City: skyscrapers with neon signs
+  sCtx.save();
+  const accent = stage.accent || '#19e3ff';
+  const accent2 = stage.accentSecondary || '#ff3fb0';
+  if (layer === 'far') {
+    sCtx.fillStyle = 'rgba(11, 31, 51, 0.40)';
+    sCtx.beginPath();
+    sCtx.moveTo(0, H);
+    sCtx.lineTo(0, H * 0.42);
+    const cols = 12;
+    const colW = unitW / cols;
+    for (let i = 0; i < cols; i++) {
+      const topH = H * (0.35 + ((i * 7) % 5) * 0.04);
+      sCtx.lineTo(i * colW, topH);
+      sCtx.lineTo((i + 1) * colW, topH);
+    }
+    sCtx.lineTo(unitW, H * 0.42);
+    sCtx.lineTo(unitW, H);
+    sCtx.closePath();
+    sCtx.fill();
+  } else if (layer === 'mid') {
+    sCtx.fillStyle = 'rgba(25, 15, 45, 0.70)';
+    sCtx.beginPath();
+    sCtx.moveTo(0, H);
+    sCtx.lineTo(0, H * 0.54);
+    const cols = 8;
+    const colW = unitW / cols;
+    for (let i = 0; i < cols; i++) {
+      const topH = H * (0.46 + ((i * 5 + 3) % 6) * 0.04);
+      sCtx.lineTo(i * colW + 4, topH);
+      sCtx.lineTo((i + 1) * colW - 4, topH);
+    }
+    sCtx.lineTo(unitW, H * 0.54);
+    sCtx.lineTo(unitW, H);
+    sCtx.closePath();
+    sCtx.fill();
+    // Glowing neon window dots
+    sCtx.fillStyle = accent;
+    for (let i = 0; i < cols; i++) {
+      const topH = H * (0.46 + ((i * 5 + 3) % 6) * 0.04);
+      for (let r = 0; r < 4; r++) {
+        sCtx.fillRect(i * colW + 12 + (r % 2) * 14, topH + 20 + r * 16, 5, 3);
+      }
+    }
+  } else {
+    // Near: sharp foreground high-rises and neon signs
+    sCtx.fillStyle = 'rgba(8, 12, 28, 0.95)';
+    sCtx.beginPath();
+    sCtx.moveTo(0, H);
+    sCtx.lineTo(0, H * 0.66);
+    const cols = 5;
+    const colW = unitW / cols;
+    for (let i = 0; i < cols; i++) {
+      const topH = H * (0.58 + ((i * 4 + 1) % 4) * 0.04);
+      sCtx.lineTo(i * colW + 8, topH);
+      sCtx.lineTo((i + 1) * colW - 8, topH);
+    }
+    sCtx.lineTo(unitW, H * 0.66);
+    sCtx.lineTo(unitW, H);
+    sCtx.closePath();
+    sCtx.fill();
+    // Neon signage bands
+    sCtx.fillStyle = accent2;
+    sCtx.fillRect(unitW * 0.22, H * 0.62, 36, 4);
+    sCtx.fillStyle = accent;
+    sCtx.fillRect(unitW * 0.65, H * 0.60, 44, 4);
+  }
+  sCtx.restore();
+}
+
+function drawMountainRidges(sCtx, unitW, H, layer, stage) {
+  // Frozen Peaks: mountain ridges
+  sCtx.save();
+  if (layer === 'far') {
+    sCtx.fillStyle = 'rgba(122, 167, 217, 0.38)';
+    sCtx.beginPath();
+    sCtx.moveTo(0, H);
+    sCtx.lineTo(0, H * 0.44);
+    sCtx.lineTo(unitW * 0.18, H * 0.32);
+    sCtx.lineTo(unitW * 0.35, H * 0.46);
+    sCtx.lineTo(unitW * 0.52, H * 0.30);
+    sCtx.lineTo(unitW * 0.70, H * 0.48);
+    sCtx.lineTo(unitW * 0.85, H * 0.34);
+    sCtx.lineTo(unitW, H * 0.44);
+    sCtx.lineTo(unitW, H);
+    sCtx.closePath();
+    sCtx.fill();
+  } else if (layer === 'mid') {
+    sCtx.fillStyle = 'rgba(74, 106, 138, 0.68)';
+    sCtx.beginPath();
+    sCtx.moveTo(0, H);
+    sCtx.lineTo(0, H * 0.56);
+    sCtx.lineTo(unitW * 0.12, H * 0.44);
+    sCtx.lineTo(unitW * 0.28, H * 0.58);
+    sCtx.lineTo(unitW * 0.44, H * 0.42);
+    sCtx.lineTo(unitW * 0.62, H * 0.60);
+    sCtx.lineTo(unitW * 0.78, H * 0.45);
+    sCtx.lineTo(unitW * 0.90, H * 0.56);
+    sCtx.lineTo(unitW, H * 0.56);
+    sCtx.lineTo(unitW, H);
+    sCtx.closePath();
+    sCtx.fill();
+  } else {
+    sCtx.fillStyle = 'rgba(30, 52, 78, 0.95)';
+    sCtx.beginPath();
+    sCtx.moveTo(0, H);
+    sCtx.lineTo(0, H * 0.70);
+    sCtx.lineTo(unitW * 0.16, H * 0.58);
+    sCtx.lineTo(unitW * 0.32, H * 0.74);
+    sCtx.lineTo(unitW * 0.54, H * 0.56);
+    sCtx.lineTo(unitW * 0.72, H * 0.72);
+    sCtx.lineTo(unitW * 0.88, H * 0.60);
+    sCtx.lineTo(unitW, H * 0.70);
+    sCtx.lineTo(unitW, H);
+    sCtx.closePath();
+    sCtx.fill();
+  }
+  sCtx.restore();
+}
+
+function drawVolcanoCliffs(sCtx, unitW, H, layer, stage) {
+  // Volcano Wasteland: jagged volcano cliffs
+  sCtx.save();
+  if (layer === 'far') {
+    sCtx.fillStyle = 'rgba(60, 18, 14, 0.42)';
+    sCtx.beginPath();
+    sCtx.moveTo(0, H);
+    sCtx.lineTo(0, H * 0.50);
+    sCtx.lineTo(unitW * 0.20, H * 0.48);
+    // Volcano caldera depression
+    sCtx.lineTo(unitW * 0.38, H * 0.32);
+    sCtx.lineTo(unitW * 0.44, H * 0.36);
+    sCtx.lineTo(unitW * 0.52, H * 0.36);
+    sCtx.lineTo(unitW * 0.58, H * 0.32);
+    sCtx.lineTo(unitW * 0.75, H * 0.48);
+    sCtx.lineTo(unitW, H * 0.50);
+    sCtx.lineTo(unitW, H);
+    sCtx.closePath();
+    sCtx.fill();
+  } else if (layer === 'mid') {
+    sCtx.fillStyle = 'rgba(42, 10, 10, 0.75)';
+    sCtx.beginPath();
+    sCtx.moveTo(0, H);
+    sCtx.lineTo(0, H * 0.64);
+    sCtx.lineTo(unitW * 0.15, H * 0.52);
+    sCtx.lineTo(unitW * 0.30, H * 0.66);
+    sCtx.lineTo(unitW * 0.46, H * 0.48);
+    sCtx.lineTo(unitW * 0.60, H * 0.64);
+    sCtx.lineTo(unitW * 0.80, H * 0.50);
+    sCtx.lineTo(unitW, H * 0.64);
+    sCtx.lineTo(unitW, H);
+    sCtx.closePath();
+    sCtx.fill();
+    // Subtle orange lava fissure glow
+    sCtx.strokeStyle = 'rgba(255, 106, 26, 0.45)';
+    sCtx.lineWidth = 2;
+    sCtx.beginPath();
+    sCtx.moveTo(unitW * 0.46, H * 0.50);
+    sCtx.lineTo(unitW * 0.48, H * 0.60);
+    sCtx.stroke();
+  } else {
+    sCtx.fillStyle = 'rgba(18, 6, 6, 0.96)';
+    sCtx.beginPath();
+    sCtx.moveTo(0, H);
+    sCtx.lineTo(0, H * 0.74);
+    sCtx.lineTo(unitW * 0.18, H * 0.62);
+    sCtx.lineTo(unitW * 0.34, H * 0.76);
+    sCtx.lineTo(unitW * 0.50, H * 0.60);
+    sCtx.lineTo(unitW * 0.68, H * 0.74);
+    sCtx.lineTo(unitW * 0.85, H * 0.62);
+    sCtx.lineTo(unitW, H * 0.74);
+    sCtx.lineTo(unitW, H);
+    sCtx.closePath();
+    sCtx.fill();
+  }
+  sCtx.restore();
+}
+
+function drawCyberFactory(sCtx, unitW, H, layer, stage) {
+  // Cyber Factory: pipes, cranes and tanks
+  sCtx.save();
+  if (layer === 'far') {
+    sCtx.fillStyle = 'rgba(35, 50, 65, 0.40)';
+    sCtx.beginPath();
+    sCtx.moveTo(0, H);
+    sCtx.lineTo(0, H * 0.48);
+    sCtx.lineTo(unitW * 0.20, H * 0.48);
+    sCtx.lineTo(unitW * 0.22, H * 0.34);
+    sCtx.lineTo(unitW * 0.25, H * 0.34);
+    sCtx.lineTo(unitW * 0.27, H * 0.48);
+    sCtx.lineTo(unitW * 0.55, H * 0.48);
+    sCtx.lineTo(unitW * 0.57, H * 0.32);
+    sCtx.lineTo(unitW * 0.60, H * 0.32);
+    sCtx.lineTo(unitW * 0.62, H * 0.48);
+    sCtx.lineTo(unitW, H * 0.48);
+    sCtx.lineTo(unitW, H);
+    sCtx.closePath();
+    sCtx.fill();
+  } else if (layer === 'mid') {
+    sCtx.fillStyle = 'rgba(22, 34, 46, 0.70)';
+    sCtx.beginPath();
+    sCtx.moveTo(0, H);
+    sCtx.lineTo(0, H * 0.62);
+    sCtx.lineTo(unitW * 0.15, H * 0.62);
+    sCtx.arc(unitW * 0.25, H * 0.62, unitW * 0.08, Math.PI, 0, false);
+    sCtx.lineTo(unitW * 0.55, H * 0.62);
+    sCtx.arc(unitW * 0.65, H * 0.62, unitW * 0.09, Math.PI, 0, false);
+    sCtx.lineTo(unitW, H * 0.62);
+    sCtx.lineTo(unitW, H);
+    sCtx.closePath();
+    sCtx.fill();
+    // Pipe run
+    sCtx.strokeStyle = 'rgba(59, 83, 104, 0.75)';
+    sCtx.lineWidth = 5;
+    sCtx.beginPath();
+    sCtx.moveTo(0, H * 0.56);
+    sCtx.lineTo(unitW, H * 0.56);
+    sCtx.stroke();
+  } else {
+    // Near: gantry cranes and yellow saw-tooth trusses
+    sCtx.fillStyle = 'rgba(12, 18, 25, 0.95)';
+    sCtx.beginPath();
+    sCtx.moveTo(0, H);
+    sCtx.lineTo(0, H * 0.72);
+    sCtx.lineTo(unitW * 0.28, H * 0.72);
+    sCtx.lineTo(unitW * 0.30, H * 0.52);
+    sCtx.lineTo(unitW * 0.44, H * 0.52);
+    sCtx.lineTo(unitW * 0.46, H * 0.72);
+    sCtx.lineTo(unitW, H * 0.72);
+    sCtx.lineTo(unitW, H);
+    sCtx.closePath();
+    sCtx.fill();
+    // Truss cross-braces
+    sCtx.strokeStyle = stage.accent || '#ffd21a';
+    sCtx.lineWidth = 2;
+    sCtx.beginPath();
+    sCtx.moveTo(unitW * 0.30, H * 0.52);
+    sCtx.lineTo(unitW * 0.44, H * 0.72);
+    sCtx.moveTo(unitW * 0.44, H * 0.52);
+    sCtx.lineTo(unitW * 0.30, H * 0.72);
+    sCtx.stroke();
+  }
+  sCtx.restore();
+}
+
+function drawAlienJungle(sCtx, unitW, H, layer, stage) {
+  // Alien Jungle: giant plants and two moons
+  sCtx.save();
+  const accent = stage.accent || '#b46bff';
+  if (layer === 'far') {
+    sCtx.fillStyle = 'rgba(26, 15, 58, 0.42)';
+    // Two celestial moons in the sky
+    sCtx.save();
+    sCtx.fillStyle = 'rgba(180, 107, 255, 0.35)';
+    sCtx.beginPath();
+    sCtx.arc(unitW * 0.28, H * 0.26, 26, 0, Math.PI * 2);
+    sCtx.fill();
+    sCtx.fillStyle = 'rgba(230, 190, 255, 0.25)';
+    sCtx.beginPath();
+    sCtx.arc(unitW * 0.36, H * 0.20, 14, 0, Math.PI * 2);
+    sCtx.fill();
+    sCtx.restore();
+
+    sCtx.beginPath();
+    sCtx.moveTo(0, H);
+    sCtx.lineTo(0, H * 0.50);
+    sCtx.bezierCurveTo(unitW * 0.20, H * 0.38, unitW * 0.35, H * 0.55, unitW * 0.50, H * 0.44);
+    sCtx.bezierCurveTo(unitW * 0.70, H * 0.38, unitW * 0.85, H * 0.52, unitW, H * 0.50);
+    sCtx.lineTo(unitW, H);
+    sCtx.closePath();
+    sCtx.fill();
+  } else if (layer === 'mid') {
+    sCtx.fillStyle = 'rgba(15, 45, 40, 0.72)';
+    sCtx.beginPath();
+    sCtx.moveTo(0, H);
+    sCtx.lineTo(0, H * 0.64);
+    sCtx.lineTo(unitW * 0.15, H * 0.64);
+    sCtx.bezierCurveTo(unitW * 0.18, H * 0.46, unitW * 0.34, H * 0.46, unitW * 0.38, H * 0.64);
+    sCtx.lineTo(unitW * 0.55, H * 0.64);
+    sCtx.bezierCurveTo(unitW * 0.60, H * 0.42, unitW * 0.78, H * 0.42, unitW * 0.84, H * 0.64);
+    sCtx.lineTo(unitW, H * 0.64);
+    sCtx.lineTo(unitW, H);
+    sCtx.closePath();
+    sCtx.fill();
+  } else {
+    // Near: sharp thorns and curled tendrils
+    sCtx.fillStyle = 'rgba(8, 22, 20, 0.96)';
+    sCtx.beginPath();
+    sCtx.moveTo(0, H);
+    sCtx.lineTo(0, H * 0.72);
+    sCtx.quadraticCurveTo(unitW * 0.18, H * 0.54, unitW * 0.28, H * 0.72);
+    sCtx.quadraticCurveTo(unitW * 0.45, H * 0.56, unitW * 0.58, H * 0.74);
+    sCtx.quadraticCurveTo(unitW * 0.78, H * 0.52, unitW * 0.90, H * 0.72);
+    sCtx.lineTo(unitW, H * 0.72);
+    sCtx.lineTo(unitW, H);
+    sCtx.closePath();
+    sCtx.fill();
+  }
+  sCtx.restore();
+}
+
+function drawOceanRuins(sCtx, unitW, H, layer, stage) {
+  // Deep Ocean Ruins: sunken ruins and rock towers
+  sCtx.save();
+  if (layer === 'far') {
+    sCtx.fillStyle = 'rgba(4, 50, 63, 0.42)';
+    sCtx.beginPath();
+    sCtx.moveTo(0, H);
+    sCtx.lineTo(0, H * 0.48);
+    sCtx.lineTo(unitW * 0.18, H * 0.48);
+    sCtx.lineTo(unitW * 0.20, H * 0.34);
+    sCtx.lineTo(unitW * 0.24, H * 0.34);
+    sCtx.lineTo(unitW * 0.26, H * 0.48);
+    sCtx.lineTo(unitW * 0.62, H * 0.48);
+    sCtx.lineTo(unitW * 0.65, H * 0.32);
+    sCtx.lineTo(unitW * 0.69, H * 0.32);
+    sCtx.lineTo(unitW * 0.72, H * 0.48);
+    sCtx.lineTo(unitW, H * 0.48);
+    sCtx.lineTo(unitW, H);
+    sCtx.closePath();
+    sCtx.fill();
+  } else if (layer === 'mid') {
+    sCtx.fillStyle = 'rgba(3, 30, 38, 0.72)';
+    sCtx.beginPath();
+    sCtx.moveTo(0, H);
+    sCtx.lineTo(0, H * 0.62);
+    sCtx.lineTo(unitW * 0.12, H * 0.62);
+    sCtx.lineTo(unitW * 0.15, H * 0.48);
+    sCtx.lineTo(unitW * 0.32, H * 0.48);
+    sCtx.lineTo(unitW * 0.35, H * 0.62);
+    sCtx.lineTo(unitW * 0.52, H * 0.62);
+    sCtx.lineTo(unitW * 0.55, H * 0.46);
+    sCtx.lineTo(unitW * 0.74, H * 0.46);
+    sCtx.lineTo(unitW * 0.78, H * 0.62);
+    sCtx.lineTo(unitW, H * 0.62);
+    sCtx.lineTo(unitW, H);
+    sCtx.closePath();
+    sCtx.fill();
+  } else {
+    // Near: sharp undersea rock needles and coral spires
+    sCtx.fillStyle = 'rgba(2, 15, 20, 0.96)';
+    sCtx.beginPath();
+    sCtx.moveTo(0, H);
+    sCtx.lineTo(0, H * 0.72);
+    sCtx.lineTo(unitW * 0.12, H * 0.58);
+    sCtx.lineTo(unitW * 0.22, H * 0.74);
+    sCtx.lineTo(unitW * 0.42, H * 0.54);
+    sCtx.lineTo(unitW * 0.56, H * 0.74);
+    sCtx.lineTo(unitW * 0.76, H * 0.56);
+    sCtx.lineTo(unitW * 0.88, H * 0.72);
+    sCtx.lineTo(unitW, H * 0.72);
+    sCtx.lineTo(unitW, H);
+    sCtx.closePath();
+    sCtx.fill();
+  }
+  sCtx.restore();
+}
+
+function drawSpaceStation(sCtx, unitW, H, layer, stage) {
+  // Space Station: a big planet and station struts
+  sCtx.save();
+  const accent = stage.accent || '#9a6bff';
+  if (layer === 'far') {
+    sCtx.fillStyle = 'rgba(15, 20, 50, 0.45)';
+    // Gigantic planet curve in upper sky
+    sCtx.save();
+    sCtx.fillStyle = 'rgba(154, 107, 255, 0.25)';
+    sCtx.beginPath();
+    sCtx.arc(unitW * 0.72, H * 0.24, 75, 0, Math.PI * 2);
+    sCtx.fill();
+    // Planetary ring band
+    sCtx.strokeStyle = 'rgba(154, 107, 255, 0.35)';
+    sCtx.lineWidth = 3;
+    sCtx.beginPath();
+    sCtx.ellipse(unitW * 0.72, H * 0.24, 115, 24, -0.28, 0, Math.PI * 2);
+    sCtx.stroke();
+    sCtx.restore();
+
+    sCtx.beginPath();
+    sCtx.moveTo(0, H);
+    sCtx.lineTo(0, H * 0.54);
+    sCtx.lineTo(unitW * 0.35, H * 0.54);
+    sCtx.lineTo(unitW * 0.45, H * 0.46);
+    sCtx.lineTo(unitW * 0.65, H * 0.46);
+    sCtx.lineTo(unitW * 0.75, H * 0.54);
+    sCtx.lineTo(unitW, H * 0.54);
+    sCtx.lineTo(unitW, H);
+    sCtx.closePath();
+    sCtx.fill();
+  } else if (layer === 'mid') {
+    sCtx.fillStyle = 'rgba(10, 14, 38, 0.72)';
+    sCtx.beginPath();
+    sCtx.moveTo(0, H);
+    sCtx.lineTo(0, H * 0.64);
+    sCtx.lineTo(unitW * 0.20, H * 0.64);
+    sCtx.rect(unitW * 0.22, H * 0.50, unitW * 0.16, 26);
+    sCtx.lineTo(unitW * 0.55, H * 0.64);
+    sCtx.rect(unitW * 0.58, H * 0.48, unitW * 0.18, 28);
+    sCtx.lineTo(unitW, H * 0.64);
+    sCtx.lineTo(unitW, H);
+    sCtx.closePath();
+    sCtx.fill();
+  } else {
+    // Near: diagonal space station girder struts
+    sCtx.fillStyle = 'rgba(4, 6, 18, 0.96)';
+    sCtx.beginPath();
+    sCtx.moveTo(0, H);
+    sCtx.lineTo(0, H * 0.74);
+    sCtx.lineTo(unitW * 0.25, H * 0.74);
+    sCtx.lineTo(unitW * 0.35, H * 0.54);
+    sCtx.lineTo(unitW * 0.48, H * 0.54);
+    sCtx.lineTo(unitW * 0.58, H * 0.74);
+    sCtx.lineTo(unitW, H * 0.74);
+    sCtx.lineTo(unitW, H);
+    sCtx.closePath();
+    sCtx.fill();
+    // Strut diagonals
+    sCtx.strokeStyle = accent;
+    sCtx.lineWidth = 2;
+    sCtx.beginPath();
+    sCtx.moveTo(unitW * 0.35, H * 0.54);
+    sCtx.lineTo(unitW * 0.58, H * 0.74);
+    sCtx.stroke();
+  }
+  sCtx.restore();
+}
+
+function renderStageSilhouettes(idx, stage, farCtx, midCtx, nearCtx, unitW, H) {
+  switch (idx) {
+    case 0:
+      drawMesasAndArches(farCtx, unitW, H, 'far', stage);
+      drawMesasAndArches(midCtx, unitW, H, 'mid', stage);
+      drawMesasAndArches(nearCtx, unitW, H, 'near', stage);
+      break;
+    case 1:
+      drawSkyscrapersWithNeon(farCtx, unitW, H, 'far', stage);
+      drawSkyscrapersWithNeon(midCtx, unitW, H, 'mid', stage);
+      drawSkyscrapersWithNeon(nearCtx, unitW, H, 'near', stage);
+      break;
+    case 2:
+      drawMountainRidges(farCtx, unitW, H, 'far', stage);
+      drawMountainRidges(midCtx, unitW, H, 'mid', stage);
+      drawMountainRidges(nearCtx, unitW, H, 'near', stage);
+      break;
+    case 3:
+      drawVolcanoCliffs(farCtx, unitW, H, 'far', stage);
+      drawVolcanoCliffs(midCtx, unitW, H, 'mid', stage);
+      drawVolcanoCliffs(nearCtx, unitW, H, 'near', stage);
+      break;
+    case 4:
+      drawCyberFactory(farCtx, unitW, H, 'far', stage);
+      drawCyberFactory(midCtx, unitW, H, 'mid', stage);
+      drawCyberFactory(nearCtx, unitW, H, 'near', stage);
+      break;
+    case 5:
+      drawAlienJungle(farCtx, unitW, H, 'far', stage);
+      drawAlienJungle(midCtx, unitW, H, 'mid', stage);
+      drawAlienJungle(nearCtx, unitW, H, 'near', stage);
+      break;
+    case 6:
+      drawOceanRuins(farCtx, unitW, H, 'far', stage);
+      drawOceanRuins(midCtx, unitW, H, 'mid', stage);
+      drawOceanRuins(nearCtx, unitW, H, 'near', stage);
+      break;
+    case 7:
+    default:
+      drawSpaceStation(farCtx, unitW, H, 'far', stage);
+      drawSpaceStation(midCtx, unitW, H, 'mid', stage);
+      drawSpaceStation(nearCtx, unitW, H, 'near', stage);
+      break;
+  }
+}
+
+function prerenderStageBackgrounds() {
+  const unitW = 720;
+  stageBgCanvases.length = 0;
+
+  STAGES.forEach((stage, idx) => {
+    // 1. Gradient canvas with light haze band in middle
+    const gradCanv = document.createElement('canvas');
+    gradCanv.width = W;
+    gradCanv.height = H;
+    const gCtx = gradCanv.getContext('2d');
+    const bgGrad = gCtx.createLinearGradient(0, 0, 0, H);
+    bgGrad.addColorStop(0, stage.gradientTop);
+    bgGrad.addColorStop(1, stage.gradientBottom);
+    gCtx.fillStyle = bgGrad;
+    gCtx.fillRect(0, 0, W, H);
+
+    // Light haze band in the middle
+    const haze = gCtx.createLinearGradient(0, H * 0.40, 0, H * 0.62);
+    haze.addColorStop(0, 'rgba(255, 255, 255, 0)');
+    haze.addColorStop(0.5, 'rgba(255, 255, 255, 0.12)');
+    haze.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    gCtx.fillStyle = haze;
+    gCtx.fillRect(0, H * 0.40, W, H * 0.22);
+
+    // 2. Far, middle, near silhouette canvases (width 720 for seamless 2xW tiling)
+    const farCanv = document.createElement('canvas');
+    farCanv.width = unitW;
+    farCanv.height = H;
+    const farCtx = farCanv.getContext('2d');
+
+    const midCanv = document.createElement('canvas');
+    midCanv.width = unitW;
+    midCanv.height = H;
+    const midCtx = midCanv.getContext('2d');
+
+    const nearCanv = document.createElement('canvas');
+    nearCanv.width = unitW;
+    nearCanv.height = H;
+    const nearCtx = nearCanv.getContext('2d');
+
+    renderStageSilhouettes(idx, stage, farCtx, midCtx, nearCtx, unitW, H);
+
+    stageBgCanvases.push({
+      gradient: gradCanv,
+      far: farCanv,
+      mid: midCanv,
+      near: nearCanv
+    });
+  });
+}
+
+// Stage Particles (slow particles in 2 sizes)
+const stageParticles = [];
+function initStageParticles() {
+  stageParticles.length = 0;
+  for (let i = 0; i < 28; i++) {
+    stageParticles.push({
+      x: rnd(0, W),
+      y: rnd(0, H),
+      sizeClass: (i % 2 === 0) ? 0 : 1, // 0 = small (~1.8px), 1 = medium (~3.8px)
+      phase: rnd(0, 6.28),
+      speed: rnd(15, 38)
+    });
+  }
+}
+
+function drawStageParticles(stage, alpha = 1) {
+  const pType = stage.particleType || 'dust';
+  const color = stage.accent || '#ffffff';
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+
+  for (let i = 0; i < stageParticles.length; i++) {
+    const p = stageParticles[i];
+    const r = (p.sizeClass === 0) ? 1.8 : 3.6;
+
+    if (pType === 'rain') {
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = (p.sizeClass === 0) ? 1.0 : 1.6;
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+      ctx.lineTo(p.x - 3, p.y + (p.sizeClass === 0 ? 8 : 14));
+      ctx.stroke();
+    } else if (pType === 'bubbles') {
+      ctx.strokeStyle = 'rgba(52, 224, 200, 0.7)';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+      ctx.beginPath();
+      ctx.arc(p.x - r * 0.3, p.y - r * 0.3, r * 0.35, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (pType === 'embers') {
+      ctx.fillStyle = '#ff6a1a';
+      ctx.shadowColor = '#ea580c';
+      ctx.shadowBlur = 4;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (pType === 'sparks') {
+      ctx.fillStyle = '#ffd21a';
+      ctx.shadowColor = '#eab308';
+      ctx.shadowBlur = 3;
+      ctx.fillRect(p.x - r / 2, p.y - r / 2, r, r);
+    } else if (pType === 'glowing spores') {
+      ctx.fillStyle = color;
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 5;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (pType === 'snow') {
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      // dust / floating dust
+      ctx.fillStyle = (pType === 'dust') ? '#f59e0b' : 'rgba(200, 180, 255, 0.7)';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+
+function updateStageParticles(dt, stage) {
+  const pType = stage.particleType || 'dust';
+
+  for (let i = 0; i < stageParticles.length; i++) {
+    const p = stageParticles[i];
+    if (pType === 'rain') {
+      p.x -= 30 * dt;
+      p.y += (350 + p.speed * 4) * dt;
+    } else if (pType === 'bubbles') {
+      p.y -= (45 + p.speed * 0.8) * dt;
+      p.x += Math.sin(p.phase + gameTime * 2) * 12 * dt;
+    } else if (pType === 'embers') {
+      p.y -= (40 + p.speed * 0.7) * dt;
+      p.x += Math.sin(p.phase + gameTime * 2.5) * 10 * dt;
+    } else if (pType === 'sparks') {
+      p.y += (65 + p.speed) * dt;
+      p.x += Math.sin(p.phase + gameTime * 3) * 16 * dt;
+    } else if (pType === 'glowing spores') {
+      p.x -= (22 + p.speed * 0.4) * dt;
+      p.y += Math.sin(p.phase + gameTime * 1.5) * 8 * dt;
+    } else if (pType === 'snow') {
+      p.y += (32 + p.speed * 0.5) * dt;
+      p.x += Math.sin(p.phase + gameTime * 1.8) * 14 * dt;
+    } else {
+      // dust / floating dust
+      p.x -= (18 + p.speed * 0.4) * dt;
+      p.y += Math.sin(p.phase + gameTime) * 6 * dt;
+    }
+
+    if (p.x < -10) p.x += W + 20;
+    if (p.x > W + 10) p.x -= W + 20;
+    if (p.y < -10) p.y += H + 20;
+    if (p.y > H + 10) p.y -= H + 20;
+  }
+}
+
+// Speed Lines
+const speedLines = [];
+function initSpeedLines() {
+  speedLines.length = 0;
+  for (let i = 0; i < 22; i++) {
+    speedLines.push({
+      x: rnd(0, W),
+      y: rnd(H * 0.12, H * 0.88),
+      len: rnd(35, 85),
+      speedMult: rnd(1.4, 2.1),
+      alpha: rnd(0.15, 0.45)
+    });
+  }
+}
+
+function updateAndDrawSpeedLines(dt, currentSp, stage) {
+  const mult = getSpeedMultiplier();
+  // None at Normal start (when mult <= 1.0 and currentSp <= W * 0.31 * 1.05)
+  if (mult <= 1.0 && currentSp <= W * 0.31 * 1.05) return;
+
+  const baseSp = W * 0.31;
+  const speedRatio = Math.max(0, (currentSp - baseSp) / (W * 0.45));
+  const activeCount = Math.min(speedLines.length, Math.round(6 + speedRatio * 14));
+  const color = stage.accent || '#19e3ff';
+
+  ctx.save();
+  for (let i = 0; i < activeCount; i++) {
+    const sl = speedLines[i];
+    sl.x -= currentSp * sl.speedMult * dt;
+    if (sl.x + sl.len < 0) {
+      sl.x = W + rnd(10, 60);
+      sl.y = rnd(H * 0.12, H * 0.88);
+      sl.len = rnd(35, 90);
+      sl.speedMult = rnd(1.4, 2.1);
+      sl.alpha = rnd(0.15, 0.45);
+    }
+
+    const lineAlpha = Math.min(0.55, sl.alpha * (0.6 + speedRatio * 0.6));
+    const grad = ctx.createLinearGradient(sl.x, 0, sl.x + sl.len, 0);
+    grad.addColorStop(0, 'rgba(255, 255, 255, 0)');
+    grad.addColorStop(0.3, color);
+    grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+
+    ctx.globalAlpha = lineAlpha;
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(sl.x, sl.y);
+    ctx.lineTo(sl.x + sl.len, sl.y);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// Soft Wind Audio (bandpass white noise WebAudio)
+let windSource = null;
+let windFilter = null;
+let windGain = null;
+
+function initWindSound() {
+  if (!audioCtx || windSource) return;
+  try {
+    const bufferSize = audioCtx.sampleRate * 2;
+    const noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+    const output = noiseBuffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      output[i] = Math.random() * 2 - 1;
+    }
+    const whiteNoise = audioCtx.createBufferSource();
+    whiteNoise.buffer = noiseBuffer;
+    whiteNoise.loop = true;
+
+    const filter = audioCtx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.value = 500;
+    filter.Q.value = 1.2;
+
+    const gain = audioCtx.createGain();
+    gain.gain.value = 0;
+
+    whiteNoise.connect(filter);
+    filter.connect(gain);
+    if (masterGain) {
+      gain.connect(masterGain);
+    } else {
+      gain.connect(audioCtx.destination);
+    }
+    whiteNoise.start(0);
+
+    windSource = whiteNoise;
+    windFilter = filter;
+    windGain = gain;
+  } catch(e) {}
+}
+
+function updateWindSound(dt, currentSp) {
+  if (!windGain || !windFilter || !audioCtx) return;
+  if (!soundEnabled || st !== 'play' || stopping || finishRunStage !== 'none') {
+    windGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.12);
+    return;
+  }
+  const baseSp = W * 0.31;
+  const speedRatio = Math.max(0, (currentSp - baseSp) / (W * 0.45));
+  const targetGain = Math.min(WIND_VOLUME, 0.015 + speedRatio * (WIND_VOLUME - 0.015));
+  const targetFreq = 420 + Math.min(850, speedRatio * 750);
+
+  windGain.gain.setTargetAtTime(targetGain, audioCtx.currentTime, 0.08);
+  windFilter.frequency.setTargetAtTime(targetFreq, audioCtx.currentTime, 0.08);
+}
+
+// ==========================================
+// COLLECTIBLE COINS & GEMS SYSTEM
+// ==========================================
+const coinFrames = [];
+const gemFrames = [];
+const coins = [];
+const coinSparkles = [];
+const flyingCoins = [];
+const coinFloatTexts = [];
+
+function renderGoldStarOnCtx(fCtx, cx, cy, r) {
+  fCtx.save();
+  fCtx.translate(cx, cy);
+  fCtx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const ang = (i * Math.PI) / 5 - Math.PI / 2;
+    const rad = (i % 2 === 0) ? r : r * 0.48;
+    const x = Math.cos(ang) * rad;
+    const y = Math.sin(ang) * rad;
+    if (i === 0) fCtx.moveTo(x, y); else fCtx.lineTo(x, y);
+  }
+  fCtx.closePath();
+
+  const starGrad = fCtx.createLinearGradient(0, -r, 0, r);
+  starGrad.addColorStop(0, '#fef08a');
+  starGrad.addColorStop(0.5, '#facc15');
+  starGrad.addColorStop(1, '#ca8a04');
+  fCtx.fillStyle = starGrad;
+  fCtx.fill();
+
+  fCtx.strokeStyle = '#713f12';
+  fCtx.lineWidth = 1.2;
+  fCtx.stroke();
+  fCtx.restore();
+}
+
+function prerenderCoinFrames() {
+  coinFrames.length = 0;
+  gemFrames.length = 0;
+
+  const cSz = Math.ceil(COIN_RADIUS * 2 + 10);
+  const cx = cSz / 2, cy = cSz / 2;
+
+  // 1. 8 Rotation frames for glossy gold coin
+  for (let i = 0; i < 8; i++) {
+    const canv = document.createElement('canvas');
+    canv.width = cSz;
+    canv.height = cSz;
+    const fCtx = canv.getContext('2d');
+
+    const ang = (i / 8) * Math.PI;
+    const cosVal = Math.cos(ang);
+    const wScale = Math.max(0.18, Math.abs(cosVal));
+
+    fCtx.save();
+    fCtx.translate(cx, cy);
+
+    // Subtle edge thickness if turned
+    if (wScale < 0.85) {
+      const edgeOffset = (1 - wScale) * 3.5;
+      fCtx.fillStyle = '#92400e';
+      fCtx.beginPath();
+      fCtx.ellipse(edgeOffset * 0.5, 0, COIN_RADIUS * wScale, COIN_RADIUS, 0, 0, Math.PI * 2);
+      fCtx.fill();
+    }
+
+    fCtx.scale(wScale, 1.0);
+
+    // Dark outline / shadow
+    fCtx.fillStyle = '#78350f';
+    fCtx.beginPath();
+    fCtx.arc(0, 0, COIN_RADIUS, 0, Math.PI * 2);
+    fCtx.fill();
+
+    // Outer bright gold rim
+    const rimGrad = fCtx.createLinearGradient(-COIN_RADIUS, -COIN_RADIUS, COIN_RADIUS, COIN_RADIUS);
+    rimGrad.addColorStop(0, '#fef9c3');
+    rimGrad.addColorStop(0.3, '#fde047');
+    rimGrad.addColorStop(0.7, '#eab308');
+    rimGrad.addColorStop(1, '#a16207');
+    fCtx.fillStyle = rimGrad;
+    fCtx.beginPath();
+    fCtx.arc(0, 0, COIN_RADIUS - 1.2, 0, Math.PI * 2);
+    fCtx.fill();
+
+    // Inner coin inset face
+    const innerGrad = fCtx.createLinearGradient(0, -COIN_RADIUS, 0, COIN_RADIUS);
+    innerGrad.addColorStop(0, '#fef08a');
+    innerGrad.addColorStop(0.5, '#eab308');
+    innerGrad.addColorStop(1, '#b45309');
+    fCtx.fillStyle = innerGrad;
+    fCtx.beginPath();
+    fCtx.arc(0, 0, COIN_RADIUS - 3.2, 0, Math.PI * 2);
+    fCtx.fill();
+
+    // Embossed star
+    renderGoldStarOnCtx(fCtx, 0, 0, (COIN_RADIUS - 3.2) * 0.58);
+
+    // Moving shine highlight across 8 frames
+    const shineX = ((i / 7) * 2 - 1) * COIN_RADIUS * 0.9;
+    const shineGrad = fCtx.createLinearGradient(shineX - 4, -COIN_RADIUS, shineX + 4, COIN_RADIUS);
+    shineGrad.addColorStop(0, 'rgba(255, 255, 255, 0)');
+    shineGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.65)');
+    shineGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    fCtx.fillStyle = shineGrad;
+    fCtx.beginPath();
+    fCtx.arc(0, 0, COIN_RADIUS - 1.5, 0, Math.PI * 2);
+    fCtx.fill();
+
+    fCtx.restore();
+    coinFrames.push(canv);
+  }
+
+  // 2. 8 Rotation frames for rare blue gem (worth 5 coins)
+  const gSz = Math.ceil(GEM_RADIUS * 2 + 12);
+  const gcx = gSz / 2, gcy = gSz / 2;
+
+  for (let i = 0; i < 8; i++) {
+    const canv = document.createElement('canvas');
+    canv.width = gSz;
+    canv.height = gSz;
+    const gCtx = canv.getContext('2d');
+
+    const ang = (i / 8) * Math.PI;
+    const wScale = Math.max(0.3, Math.abs(Math.cos(ang)));
+
+    gCtx.save();
+    gCtx.translate(gcx, gcy);
+    gCtx.scale(wScale, 1.0);
+
+    const gr = GEM_RADIUS;
+
+    // Diamond gem outline / shadow
+    gCtx.fillStyle = '#082f49';
+    gCtx.beginPath();
+    gCtx.moveTo(0, -gr);
+    gCtx.lineTo(gr * 0.85, -gr * 0.35);
+    gCtx.lineTo(gr * 0.65, gr * 0.55);
+    gCtx.lineTo(0, gr);
+    gCtx.lineTo(-gr * 0.65, gr * 0.55);
+    gCtx.lineTo(-gr * 0.85, -gr * 0.35);
+    gCtx.closePath();
+    gCtx.fill();
+
+    // Blue gem body gradient
+    const gemGrad = gCtx.createLinearGradient(0, -gr, 0, gr);
+    gemGrad.addColorStop(0, '#e0f2fe');
+    gemGrad.addColorStop(0.2, '#38bdf8');
+    gemGrad.addColorStop(0.6, '#0284c7');
+    gemGrad.addColorStop(1, '#075985');
+    gCtx.fillStyle = gemGrad;
+    gCtx.beginPath();
+    gCtx.moveTo(0, -gr + 1.5);
+    gCtx.lineTo(gr * 0.85 - 1.2, -gr * 0.35);
+    gCtx.lineTo(gr * 0.65 - 1.2, gr * 0.55 - 1.0);
+    gCtx.lineTo(0, gr - 1.5);
+    gCtx.lineTo(-gr * 0.65 + 1.2, gr * 0.55 - 1.0);
+    gCtx.lineTo(-gr * 0.85 + 1.2, -gr * 0.35);
+    gCtx.closePath();
+    gCtx.fill();
+
+    // Internal facet lines
+    gCtx.strokeStyle = 'rgba(255, 255, 255, 0.75)';
+    gCtx.lineWidth = 1.0;
+    gCtx.beginPath();
+    gCtx.moveTo(0, -gr + 1.5);
+    gCtx.lineTo(0, gr - 1.5);
+    gCtx.moveTo(-gr * 0.85 + 1.2, -gr * 0.35);
+    gCtx.lineTo(gr * 0.85 - 1.2, -gr * 0.35);
+    gCtx.stroke();
+
+    // Moving sparkle glint on one facet
+    if (i % 2 === 0) {
+      gCtx.fillStyle = '#ffffff';
+      gCtx.beginPath();
+      gCtx.arc(-gr * 0.3, -gr * 0.45, 2.5, 0, Math.PI * 2);
+      gCtx.fill();
+    }
+
+    gCtx.restore();
+    gemFrames.push(canv);
+  }
+}
+
+function playCoinPickupSound(isGem = false) {
+  if (!soundEnabled || !audioCtx) return;
+  try {
+    const now = audioCtx.currentTime;
+    coinCombo = Math.min(8, coinCombo + 1);
+    coinComboTimer = 0.8;
+
+    const pitchFactor = Math.pow(2, coinCombo / 12);
+    const outNode = masterGain || audioCtx.destination;
+
+    if (isGem) {
+      // Fuller double chime for rare blue gem
+      const g1 = audioCtx.createGain();
+      g1.gain.setValueAtTime(0.28, now);
+      g1.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+      g1.connect(outNode);
+
+      [1046.5 * pitchFactor, 1567.98 * pitchFactor].forEach(f => {
+        const osc = audioCtx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(f, now);
+        osc.connect(g1);
+        osc.start(now);
+        osc.stop(now + 0.22);
+      });
+
+      const g2 = audioCtx.createGain();
+      g2.gain.setValueAtTime(0, now);
+      g2.gain.setValueAtTime(0.26, now + 0.05);
+      g2.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
+      g2.connect(outNode);
+
+      [2093.0 * pitchFactor, 2637.0 * pitchFactor].forEach(f => {
+        const osc = audioCtx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(f, now + 0.05);
+        osc.connect(g2);
+        osc.start(now + 0.05);
+        osc.stop(now + 0.28);
+      });
+      return;
+    }
+
+    // Standard coin "ting" (two sine partials at 1318 Hz and 1976 Hz, 140ms decay, vol 0.25)
+    const f1 = 1318 * pitchFactor;
+    const f2 = 1976 * pitchFactor;
+
+    const g = audioCtx.createGain();
+    g.gain.setValueAtTime(0.25, now);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
+    g.connect(outNode);
+
+    [f1, f2].forEach(f => {
+      const osc = audioCtx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(f, now);
+      osc.connect(g);
+      osc.start(now);
+      osc.stop(now + 0.14);
+    });
+  } catch (e) {}
+}
+
+function getCorridorSafeBounds(x, segsList) {
+  for (let i = 0; i < segsList.length; i++) {
+    const s = segsList[i];
+    if (x >= s.x && x <= s.x + s.w) {
+      if (s.isOpen) {
+        return {
+          top: -300,
+          bot: H + 300,
+          safeTop: 120,
+          safeBot: H - 120,
+          safeCenter: CAR_REST_Y - 40,
+          halfH: 100
+        };
+      }
+      let curTop = (s.curTop !== undefined) ? s.curTop : s.top;
+      let curBot = (s.curBot !== undefined) ? s.curBot : s.bot;
+
+      // Smooth step interpolation near segment boundary
+      if (i < segsList.length - 1) {
+        const sNext = segsList[i + 1];
+        if (!sNext.isOpen) {
+          const seamX = s.x + s.w;
+          const blendDist = 48 * 1.2;
+          if (x > seamX - blendDist) {
+            const t = (x - (seamX - blendDist)) / blendDist;
+            const ease = t * t * (3 - 2 * t);
+            const nextTop = (sNext.curTop !== undefined) ? sNext.curTop : sNext.top;
+            const nextBot = (sNext.curBot !== undefined) ? sNext.curBot : sNext.bot;
+            curTop = curTop + (nextTop - curTop) * ease;
+            curBot = curBot + (nextBot - curBot) * ease;
+          }
+        }
+      }
+
+      const safeTop = curTop + 1.2 * 48;
+      const safeBot = curBot - 1.2 * 48;
+      const safeCenter = (safeTop + safeBot) / 2;
+      const halfH = Math.max(12, (safeBot - safeTop) / 2 - COIN_RADIUS);
+      return { top: curTop, bot: curBot, safeTop, safeBot, safeCenter, halfH };
+    }
+  }
+  return {
+    top: -300,
+    bot: H + 300,
+    safeTop: 120,
+    safeBot: H - 120,
+    safeCenter: CAR_REST_Y,
+    halfH: 100
+  };
+}
+
+function generateLevelCoins(lvl, segsList) {
+  coins.length = 0;
+  coinSparkles.length = 0;
+  flyingCoins.length = 0;
+  coinFloatTexts.length = 0;
+  levelCoinsCollected = 0;
+
+  const prng = mulberry32(hashInt(lvl * 77777 + 98765));
+  const coinSpacing = 1.1 * 48; // ~52.8 px
+  const sp = scrollSpeed();
+
+  // 1. START GUIDE: 5 coins in a gentle arc leading from road into tunnel
+  const startX = START_ROAD_START + (START_ROAD_END - START_ROAD_START) * 0.60;
+  const firstSegBounds = getCorridorSafeBounds(TUNNEL_START_X + 60, segsList);
+  const targetEntryY = firstSegBounds.safeCenter;
+
+  for (let k = 0; k < 5; k++) {
+    const t = k / 4;
+    const x = startX + k * coinSpacing;
+    const y = CAR_REST_Y - (CAR_REST_Y - targetEntryY) * Math.sin(t * Math.PI * 0.5);
+    coins.push({
+      x,
+      y,
+      type: 'coin',
+      collected: false,
+      phase: prng() * 6.28,
+      popTimer: 0
+    });
+  }
+
+  // 2. TUNNEL COIN PATTERNS (Subway Surfers style: straight, wave, arc, staircase, double row, risk line)
+  let curX = TUNNEL_START_X + 180;
+  const tunnelMaxX = TUNNEL_END_X - 180;
+
+  const patternTypes = ['straight', 'wave', 'arc_up', 'arc_down', 'staircase', 'double_row', 'risk_high', 'risk_low'];
+  const totalApproxPatterns = Math.max(1, Math.floor((tunnelMaxX - curX) / (sp * 1.35)));
+  const gemPatternIndex = Math.floor(totalApproxPatterns * (0.45 + prng() * 0.25));
+  let patternCount = 0;
+  let gemPlaced = false;
+
+  while (curX < tunnelMaxX) {
+    const pType = patternTypes[Math.floor(prng() * patternTypes.length)];
+    const count = (pType === 'double_row') ? Math.floor(prng() * 3 + 4) : Math.floor(prng() * 4 + 5); // 5 to 8 coins
+    const isGemPattern = (patternCount === gemPatternIndex && !gemPlaced);
+
+    if (pType === 'straight') {
+      const gemIdx = isGemPattern ? Math.floor(count / 2) : -1;
+      for (let k = 0; k < count; k++) {
+        const cx = curX + k * coinSpacing;
+        if (cx > tunnelMaxX) break;
+        const b = getCorridorSafeBounds(cx, segsList);
+        const y = b.safeCenter;
+        const isGem = (k === gemIdx);
+        if (isGem) gemPlaced = true;
+        coins.push({
+          x: cx,
+          y,
+          type: isGem ? 'gem' : 'coin',
+          collected: false,
+          phase: prng() * 6.28,
+          popTimer: 0
+        });
+      }
+    } else if (pType === 'wave') {
+      const gemIdx = isGemPattern ? Math.floor(count / 2) : -1;
+      for (let k = 0; k < count; k++) {
+        const cx = curX + k * coinSpacing;
+        if (cx > tunnelMaxX) break;
+        const b = getCorridorSafeBounds(cx, segsList);
+        const amp = Math.min(b.halfH * 0.65, 36);
+        const y = b.safeCenter + Math.sin((k / count) * Math.PI * 2) * amp;
+        const isGem = (k === gemIdx);
+        if (isGem) gemPlaced = true;
+        coins.push({
+          x: cx,
+          y: Math.max(b.safeTop + COIN_RADIUS, Math.min(b.safeBot - COIN_RADIUS, y)),
+          type: isGem ? 'gem' : 'coin',
+          collected: false,
+          phase: prng() * 6.28,
+          popTimer: 0
+        });
+      }
+    } else if (pType === 'arc_up' || pType === 'arc_down') {
+      const sign = (pType === 'arc_up') ? -1 : 1;
+      const gemIdx = isGemPattern ? Math.floor(count / 2) : -1;
+      for (let k = 0; k < count; k++) {
+        const cx = curX + k * coinSpacing;
+        if (cx > tunnelMaxX) break;
+        const b = getCorridorSafeBounds(cx, segsList);
+        const t = k / (count - 1);
+        const arc = 4 * t * (1 - t);
+        const amp = Math.min(b.halfH * 0.70, 38);
+        const y = b.safeCenter + sign * arc * amp;
+        const isGem = (k === gemIdx);
+        if (isGem) gemPlaced = true;
+        coins.push({
+          x: cx,
+          y: Math.max(b.safeTop + COIN_RADIUS, Math.min(b.safeBot - COIN_RADIUS, y)),
+          type: isGem ? 'gem' : 'coin',
+          collected: false,
+          phase: prng() * 6.28,
+          popTimer: 0
+        });
+      }
+    } else if (pType === 'staircase') {
+      const bStart = getCorridorSafeBounds(curX, segsList);
+      const bEnd = getCorridorSafeBounds(curX + count * coinSpacing, segsList);
+      for (let k = 0; k < count; k++) {
+        const cx = curX + k * coinSpacing;
+        if (cx > tunnelMaxX) break;
+        const b = getCorridorSafeBounds(cx, segsList);
+        const t = k / (count - 1);
+        const ease = t * t * (3 - 2 * t);
+        const y = bStart.safeCenter + (bEnd.safeCenter - bStart.safeCenter) * ease;
+        coins.push({
+          x: cx,
+          y: Math.max(b.safeTop + COIN_RADIUS, Math.min(b.safeBot - COIN_RADIUS, y)),
+          type: 'coin',
+          collected: false,
+          phase: prng() * 6.28,
+          popTimer: 0
+        });
+      }
+    } else if (pType === 'double_row') {
+      for (let k = 0; k < count; k++) {
+        const cx = curX + k * coinSpacing;
+        if (cx > tunnelMaxX) break;
+        const b = getCorridorSafeBounds(cx, segsList);
+        const offset = Math.min(18, b.halfH * 0.45);
+        coins.push({
+          x: cx,
+          y: b.safeCenter - offset,
+          type: 'coin',
+          collected: false,
+          phase: prng() * 6.28,
+          popTimer: 0
+        });
+        coins.push({
+          x: cx,
+          y: b.safeCenter + offset,
+          type: 'coin',
+          collected: false,
+          phase: (prng() * 6.28) + 1.5,
+          popTimer: 0
+        });
+      }
+    } else {
+      // risk line slightly toward one edge of safe band (still safe)
+      const isHigh = (pType === 'risk_high');
+      const gemIdx = isGemPattern ? Math.floor(count / 2) : -1;
+      for (let k = 0; k < count; k++) {
+        const cx = curX + k * coinSpacing;
+        if (cx > tunnelMaxX) break;
+        const b = getCorridorSafeBounds(cx, segsList);
+        const offset = Math.min(30, b.halfH * 0.65);
+        const y = isHigh ? (b.safeCenter - offset) : (b.safeCenter + offset);
+        const isGem = (k === gemIdx);
+        if (isGem) gemPlaced = true;
+        coins.push({
+          x: cx,
+          y: Math.max(b.safeTop + COIN_RADIUS, Math.min(b.safeBot - COIN_RADIUS, y)),
+          type: isGem ? 'gem' : 'coin',
+          collected: false,
+          phase: prng() * 6.28,
+          popTimer: 0
+        });
+      }
+    }
+
+    patternCount++;
+    const patternLen = count * coinSpacing;
+    const gapSec = 0.8 + prng() * 0.8; // 0.8s to 1.6s
+    curX += patternLen + (gapSec * sp);
+  }
+
+  // 3. FINISH ROAD: 10 straight coins along the asphalt collected during finish run
+  const finishCoinY = CAR_REST_Y - COIN_RADIUS - 2;
+  for (let k = 0; k < 10; k++) {
+    coins.push({
+      x: FINISH_ROAD_X + 60 + k * coinSpacing,
+      y: finishCoinY,
+      type: 'coin',
+      collected: false,
+      phase: prng() * 6.28,
+      popTimer: 0
+    });
+  }
 }
 
 // ==========================================
@@ -1757,8 +3150,8 @@ function drawRibbonHeader(cx, cy, w, h, text, themeColor, starCount = 2) {
   ctx.restore();
 }
 
-// Coin-Counter Pill with bold white text and dark outline
-function drawCoinPill(x, y, w, h, val, isBest = false) {
+// Score Pill with gold star badge (not confused with coins)
+function drawScorePill(x, y, w, h, val, isBest = false) {
   ctx.save();
   ctx.shadowColor = 'rgba(0, 0, 0, 0.35)';
   ctx.shadowBlur = 6;
@@ -1774,19 +3167,59 @@ function drawCoinPill(x, y, w, h, val, isBest = false) {
   roundRect(ctx, x, y, w, h, h / 2);
   ctx.stroke();
 
-  const coinR = h * 0.58;
-  const coinX = x + h * 0.48;
-  const coinY = y + h * 0.5;
-
-  ctx.fillStyle = '#eab308';
-  ctx.beginPath(); ctx.arc(coinX, coinY, coinR, 0, 6.28); ctx.fill();
-  ctx.strokeStyle = '#713f12'; ctx.lineWidth = 1.5; ctx.stroke();
-  drawGoldStar(coinX, coinY, coinR * 0.65);
+  // Small gold star badge on left
+  const starCX = x + h * 0.52;
+  const starCY = y + h * 0.5;
+  drawGoldStar(starCX, starCY, h * 0.38);
 
   const label = isBest ? `BEST ${val}` : `${val}`;
-  drawGlossyText(label, x + (w + coinR) / 2 + 2, y + h / 2 + 1, 15, 'center', '#ffffff', '#0f172a', 3.8);
+  drawGlossyText(label, x + (w + h * 0.35) / 2 + 1, y + h / 2 + 1, Math.min(14, h * 0.58), 'center', '#ffffff', '#0f172a', 3.2);
 
   ctx.restore();
+}
+
+// Wallet Coin-Counter Pill with glossy gold coin icon
+function drawWalletCoinPill(x, y, w, h, coinsVal, bump = 1.0) {
+  ctx.save();
+  if (bump > 1.0) {
+    ctx.translate(x + w / 2, y + h / 2);
+    ctx.scale(bump, bump);
+    ctx.translate(-(x + w / 2), -(y + h / 2));
+  }
+
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.35)';
+  ctx.shadowBlur = 6;
+  ctx.shadowOffsetY = 3;
+
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+  roundRect(ctx, x, y, w, h, h / 2);
+  ctx.fill();
+
+  ctx.shadowColor = 'transparent';
+  ctx.strokeStyle = '#facc15';
+  ctx.lineWidth = 1.6;
+  roundRect(ctx, x, y, w, h, h / 2);
+  ctx.stroke();
+
+  // Glossy gold coin on left
+  const coinCX = x + h * 0.52;
+  const coinCY = y + h * 0.5;
+  const animFrame = Math.floor((gameTime * 10) % 8);
+  if (coinFrames[animFrame]) {
+    const spr = coinFrames[animFrame];
+    const coinScale = (h * 0.78) / spr.height;
+    ctx.drawImage(spr, coinCX - (spr.width * coinScale) / 2, coinCY - (spr.height * coinScale) / 2, spr.width * coinScale, spr.height * coinScale);
+  } else {
+    drawGoldStar(coinCX, coinCY, h * 0.36);
+  }
+
+  drawGlossyText(`${coinsVal}`, x + (w + h * 0.35) / 2 + 1, y + h / 2 + 1, Math.min(15, h * 0.60), 'center', '#ffffff', '#0f172a', 3.4);
+  ctx.restore();
+}
+
+// Backward-compatible alias
+function drawCoinPill(x, y, w, h, val, isBest = false) {
+  drawScorePill(x, y, w, h, val, isBest);
 }
 
 // ==========================================
@@ -1925,13 +3358,14 @@ function getLevelDifficulty(lvl, p = 0) {
   return { f, fBase, intra };
 }
 
-// Scroll speed multiplier = 1 + 0.35 * f
+// Scroll speed: canvasWidth * 0.31 * multiplier at level 1, growing with difficulty up to 1.4 * starting speed
 function scrollSpeed(difficultyDistance = getDifficultyDistance()) {
   const p = getLevelProgress();
   const { f } = getLevelDifficulty(curLevel, p);
-  const baseSpeed = W * BASE_SCROLL_SPEED_RATIO;
-  const multiplier = 1 + SCROLL_SPEED_GROWTH * f;
-  return baseSpeed * multiplier * SPEED_MULTIPLIER;
+  const mult = getSpeedMultiplier();
+  const startingSpeed = W * BASE_SCROLL_SPEED_RATIO * mult;
+  const diffMultiplier = Math.min(1.4, 1 + SCROLL_SPEED_GROWTH * f);
+  return startingSpeed * diffMultiplier * SPEED_MULTIPLIER;
 }
 const speed = scrollSpeed;
 
@@ -2026,13 +3460,15 @@ function addSeg(isOpen = false, forceLen) {
   const { f } = getLevelDifficulty(curLevel, p);
 
   const currentScrollSpeed = scrollSpeed();
+  const mult = getSpeedMultiplier();
 
-  // 1. Segment Length = lerp(1.3, 1.0, f) * BASE_SEGMENT_LEN (never shorter than base length)
-  const baseLen = lerp(SEG_LEN_LEVEL_1_RATIO, SEG_LEN_MAX_RATIO, f) * BASE_SEGMENT_LEN;
-  let len = forceLen || Math.max(BASE_SEGMENT_LEN, Math.round(baseLen));
+  // 1. Segment Length >= 1.3 * scrollSpeed
+  const minSegLen = Math.round(1.3 * currentScrollSpeed);
+  const baseLen = lerp(SEG_LEN_LEVEL_1_RATIO, SEG_LEN_MAX_RATIO, f) * BASE_SEGMENT_LEN * mult;
+  let len = forceLen || Math.max(minSegLen, Math.round(baseLen));
 
   if (!isOpen && nextX + len > TUNNEL_END_X) {
-    len = Math.max(60, TUNNEL_END_X - nextX);
+    len = Math.max(minSegLen, TUNNEL_END_X - nextX);
   }
 
   // 2. Base Gap Height = lerp(4.4, 3.0, f) * carH (never below 3.0 * carH)
@@ -2049,7 +3485,7 @@ function addSeg(isOpen = false, forceLen) {
   }
   if (isSqueeze) {
     gap = SQUEEZE_GAP_RATIO * CAR_HITBOX_H;
-    len = Math.max(BASE_SEGMENT_LEN, Math.round(len * 0.9));
+    len = Math.max(minSegLen, Math.round(len * 0.9));
   }
 
   // Seed twists for this level:
@@ -2075,12 +3511,14 @@ function addSeg(isOpen = false, forceLen) {
     }
   }
 
-  // 5. FAIR STEPS WITH REACTION TIME (Requirement 2):
-  // The vertical step between two neighboring segments must be at most min(0.5 * gapHeight, 0.4 * MAX_UP_SPEED * segmentLength / scrollSpeed).
-  // Also require that the gap windows of two neighboring segments overlap by at least 1.4 * carH:
-  // |cB - cA| <= (lastGap + gap)/2 - 1.4 * carH. If a generated step breaks a rule, reduce it.
-  const fairStep = Math.min(0.5 * gap, 0.4 * MAX_UP_SPEED * (len / currentScrollSpeed));
-  const overlapStepLimit = Math.max(8, (lastGap + gap) / 2 - 1.4 * CAR_HITBOX_H);
+  // 5. FAIR STEPS WITH REACTION TIME (Requirement 3):
+  // Up steps: 0.4 * MAX_UP_SPEED * segmentTime, down steps: 0.35 * terminalSinkSpeed * segmentTime.
+  // Window overlap >= 2.0 * carH: |cB - cA| <= (lastGap + gap)/2 - 2.0 * carH.
+  const segTime = len / currentScrollSpeed;
+  const maxUpStep = 0.4 * MAX_UP_SPEED * segTime;
+  const maxDownStep = 0.35 * MAX_DOWN_SPEED * segTime;
+  const fairStep = Math.min(0.5 * gap, Math.max(maxUpStep, maxDownStep));
+  const overlapStepLimit = Math.max(8, (lastGap + gap) / 2 - 2.0 * CAR_HITBOX_H);
   const maxFairStep = Math.min(fairStep, overlapStepLimit);
 
   const stepRatio = lerp(STEP_MIN_RATIO, STEP_MAX_RATIO, f);
@@ -2189,11 +3627,14 @@ function sanitizeLevelSegments(segmentList) {
     const gapB = curr.bot - curr.top;
     const lenB = curr.w;
 
-    // 1. Step limit = min(0.5 * gapB, 0.4 * MAX_UP_SPEED * lenB / currentScrollSpeed)
-    const fairStep = Math.min(0.5 * gapB, 0.4 * MAX_UP_SPEED * (lenB / currentScrollSpeed));
+    // 1. Step limit: up steps 0.4 * MAX_UP_SPEED * segTime, down steps 0.35 * MAX_DOWN_SPEED * segTime
+    const segTime = lenB / currentScrollSpeed;
+    const maxUpStep = 0.4 * MAX_UP_SPEED * segTime;
+    const maxDownStep = 0.35 * MAX_DOWN_SPEED * segTime;
+    const fairStep = Math.min(0.5 * gapB, Math.max(maxUpStep, maxDownStep));
 
-    // 2. Window overlap >= 1.4 * carH => |cB - cA| <= (gapA + gapB)/2 - 1.4 * carH
-    const overlapStepLimit = Math.max(8, (gapA + gapB) / 2 - 1.4 * carH);
+    // 2. Window overlap >= 2.0 * carH => |cB - cA| <= (gapA + gapB)/2 - 2.0 * carH
+    const overlapStepLimit = Math.max(8, (gapA + gapB) / 2 - 2.0 * carH);
     const maxAllowedStep = Math.min(fairStep, overlapStepLimit);
 
     const cA = (prev.top + prev.bot) / 2;
@@ -2211,10 +3652,10 @@ function sanitizeLevelSegments(segmentList) {
     const safeMaxC = Math.max(bandMinC, bandMaxC);
     cB = Math.max(safeMinC, Math.min(safeMaxC, cB));
 
-    // Ensure overlap >= 1.4 * carH
+    // Ensure overlap >= 2.0 * carH
     const curOverlap = Math.min(prev.bot, cB + gapB / 2) - Math.max(prev.top, cB - gapB / 2);
-    if (curOverlap < 1.4 * carH) {
-      cB = (cB > cA) ? (prev.bot + gapB / 2 - 1.4 * carH) : (prev.top - gapB / 2 + 1.4 * carH);
+    if (curOverlap < 2.0 * carH) {
+      cB = (cB > cA) ? (prev.bot + gapB / 2 - 2.0 * carH) : (prev.top - gapB / 2 + 2.0 * carH);
       cB = Math.max(safeMinC, Math.min(safeMaxC, cB));
     }
 
@@ -2242,6 +3683,15 @@ function sanitizeLevelSegments(segmentList) {
 
 function startLevel(lvl) {
   curLevel = lvl;
+
+  const newStage = getStageNumber(lvl);
+  if (newStage !== currentBgStage) {
+    prevBgStage = currentBgStage;
+    currentBgStage = newStage;
+    bgCrossFadeTimer = 0.6;
+  }
+  updateSpeedPhysics();
+
   cam = 0;
   vy = 0;
   thrust = 0;
@@ -2304,6 +3754,9 @@ function startLevel(lvl) {
 
   // Requirement 4: Sanitize all neighboring segment pairs
   sanitizeLevelSegments(segs);
+
+  // Generate collectible coins and rare blue gem for the level
+  generateLevelCoins(lvl, segs);
 
   const postW = (FINISH_ROAD_END + 500) - TUNNEL_END_X;
   const endSpikes = makeSpikes(postW, curLevel, -300, H + 300, true, levelPRNG);
@@ -3146,6 +4599,25 @@ function car(drawX = CAR_X) {
   ctx.save();
   ctx.translate(drawX, cy);
 
+  // Short soft cyan trail behind the car while thrust is held
+  if (hold && st === 'play' && finishRunStage === 'none' && !stopping) {
+    ctx.save();
+    const trailLen = drawW * 0.55;
+    const trailGrad = ctx.createLinearGradient(-drawW / 2 - trailLen, 0, -drawW / 2 + 6, 0);
+    trailGrad.addColorStop(0, 'rgba(6, 182, 212, 0)');
+    trailGrad.addColorStop(0.65, 'rgba(34, 211, 238, 0.32)');
+    trailGrad.addColorStop(1, 'rgba(165, 243, 252, 0.70)');
+    ctx.fillStyle = trailGrad;
+    ctx.beginPath();
+    ctx.moveTo(-drawW / 2 + 6, -drawH * 0.12);
+    ctx.lineTo(-drawW / 2 - trailLen, -2);
+    ctx.lineTo(-drawW / 2 - trailLen, 2);
+    ctx.lineTo(-drawW / 2 + 6, drawH * 0.20);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
   if (trimmedCarCanvas) {
     ctx.shadowColor = 'transparent';
     ctx.shadowBlur = 0;
@@ -3256,36 +4728,88 @@ function car(drawX = CAR_X) {
   ctx.restore();
 }
 
-// Background drawing: uses attached bright picture, seamless mirrored tiling, 15% parallax scroll
-function drawBackground() {
-  const pic = getLevelPicture(curLevel);
-
-  if (pic && pic.seamlessCanvas) {
-    // 1. Picture is bright and fully visible, with no dark overlay on top of it.
-    // 2. Scaled to full canvas height (640), keeping aspect ratio.
-    // 3. Scroll slowly from right to left behind the game at 15% of world scroll speed.
-    // 4. Mirrored (flipped) copy next to it avoids visible seam when it loops.
-    const unitW = pic.unitW;
-    const scrollX = cam * 0.15;
-    const relX = -((scrollX % unitW + unitW) % unitW);
-
-    ctx.drawImage(pic.seamlessCanvas, relX, 0);
-    if (relX + unitW < W) {
-      ctx.drawImage(pic.seamlessCanvas, relX + unitW, 0);
-    }
-    if (relX > 0) {
-      ctx.drawImage(pic.seamlessCanvas, relX - unitW, 0);
-    }
-  } else {
-    // Graceful fallback to procedural scene if picture fails to load
-    if (fallbackBgCanvas) {
-      ctx.drawImage(fallbackBgCanvas, 0, 0);
-    } else {
-      ctx.fillStyle = '#48cae4';
-      ctx.fillRect(0, 0, W, H);
-    }
+// Background drawing: clean cinematic background with 3 parallax silhouettes, haze, particles, tunnel dark gradient and vignette
+function drawParallaxLayer(layerCanv, rate) {
+  if (!layerCanv) return;
+  const unitW = layerCanv.width;
+  const scrollX = cam * rate;
+  const relX = -((scrollX % unitW + unitW) % unitW);
+  ctx.drawImage(layerCanv, relX, 0);
+  if (relX + unitW < W) {
+    ctx.drawImage(layerCanv, relX + unitW, 0);
+  }
+  if (relX > 0) {
+    ctx.drawImage(layerCanv, relX - unitW, 0);
   }
 }
+
+function drawPreRenderedStage(bgData) {
+  if (bgData.gradient) {
+    ctx.drawImage(bgData.gradient, 0, 0);
+  }
+  drawParallaxLayer(bgData.far, 0.08);
+  drawParallaxLayer(bgData.mid, 0.14);
+  drawParallaxLayer(bgData.near, 0.22);
+}
+
+function drawStageScene(stageNum, alpha = 1) {
+  const stageIdx = (stageNum - 1) % STAGES.length;
+  const stage = STAGES[stageIdx];
+  const bgData = stageBgCanvases[stageIdx];
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+
+  if (stage.backgroundPicture && stage.backgroundPicture.length > 0) {
+    const pic = getLevelPicture(curLevel);
+    if (pic && pic.seamlessCanvas) {
+      const unitW = pic.unitW;
+      const scrollX = cam * 0.15;
+      const relX = -((scrollX % unitW + unitW) % unitW);
+      ctx.drawImage(pic.seamlessCanvas, relX, 0);
+      if (relX + unitW < W) ctx.drawImage(pic.seamlessCanvas, relX + unitW, 0);
+      if (relX > 0) ctx.drawImage(pic.seamlessCanvas, relX - unitW, 0);
+    } else if (bgData) {
+      drawPreRenderedStage(bgData);
+    }
+  } else if (bgData) {
+    drawPreRenderedStage(bgData);
+  } else {
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, stage.gradientTop);
+    grad.addColorStop(1, stage.gradientBottom);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  drawStageParticles(stage, alpha);
+  ctx.restore();
+}
+
+function drawBackground() {
+  if (bgCrossFadeTimer > 0 && prevBgStage !== currentBgStage) {
+    const fade = 1 - Math.max(0, Math.min(1, bgCrossFadeTimer / 0.6));
+    drawStageScene(prevBgStage, 1);
+    drawStageScene(currentBgStage, fade);
+  } else {
+    drawStageScene(currentBgStage, 1);
+  }
+
+  // Slight dark gradient behind the tunnel area (about 25 percent black, soft edges)
+  const tunnelGrad = ctx.createLinearGradient(0, H * 0.12, 0, H * 0.88);
+  tunnelGrad.addColorStop(0, 'rgba(0, 0, 0, 0)');
+  tunnelGrad.addColorStop(0.25, 'rgba(0, 0, 0, 0.25)');
+  tunnelGrad.addColorStop(0.75, 'rgba(0, 0, 0, 0.25)');
+  tunnelGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  ctx.fillStyle = tunnelGrad;
+  ctx.fillRect(0, H * 0.12, W, H * 0.76);
+
+  // Soft vignette on the screen edges
+  if (vignetteCanvas) {
+    ctx.drawImage(vignetteCanvas, 0, 0);
+  }
+}
+
 
 // ==========================================
 // GAME LOOP (STEP & DRAW)
@@ -3338,6 +4862,132 @@ function step(dt) {
       }
     }
     return;
+  }
+
+  if (bgCrossFadeTimer > 0) {
+    bgCrossFadeTimer = Math.max(0, bgCrossFadeTimer - dt);
+  }
+  const curStageIdx = (currentBgStage - 1) % STAGES.length;
+  updateStageParticles(dt, STAGES[curStageIdx]);
+  updateWindSound(dt, sp);
+
+  // Coin combo reset & counter bump decay
+  if (coinComboTimer > 0) {
+    coinComboTimer -= dt;
+    if (coinComboTimer <= 0) coinCombo = 0;
+  }
+  if (coinCounterBump > 1.0) {
+    coinCounterBump = Math.max(1.0, coinCounterBump - dt * 2.5);
+  }
+
+  // Update flying coins
+  for (let i = flyingCoins.length - 1; i >= 0; i--) {
+    const fc = flyingCoins[i];
+    fc.t += dt / fc.dur;
+    if (fc.t >= 1.0) {
+      flyingCoins.splice(i, 1);
+      coinCounterBump = 1.35;
+    } else {
+      const t = fc.t;
+      const ease = t * t * (3 - 2 * t);
+      fc.curX = fc.startX + (fc.endX - fc.startX) * ease;
+      fc.curY = fc.startY + (fc.endY - fc.startY) * ease;
+    }
+  }
+
+  // Update coin sparkles
+  for (let i = coinSparkles.length - 1; i >= 0; i--) {
+    const spk = coinSparkles[i];
+    spk.x += spk.vx * dt;
+    spk.y += spk.vy * dt;
+    spk.vy += 220 * dt;
+    spk.life -= dt;
+    if (spk.life <= 0) coinSparkles.splice(i, 1);
+  }
+
+  // Update floating +1 / +5 texts
+  for (let i = coinFloatTexts.length - 1; i >= 0; i--) {
+    const ft = coinFloatTexts[i];
+    ft.y -= 38 * dt;
+    ft.timer -= dt;
+    if (ft.timer <= 0) coinFloatTexts.splice(i, 1);
+  }
+
+  // Update collected coins pop animation
+  for (let i = 0; i < coins.length; i++) {
+    const c = coins[i];
+    if (c.collected && c.popTimer > 0) {
+      c.popTimer = Math.max(0, c.popTimer - dt);
+    }
+  }
+
+  // Coin collision detection during play
+  if (st === 'play' && !stopping) {
+    const carCX = cam + carDrawX;
+    const carCY = cy;
+
+    for (let i = 0; i < coins.length; i++) {
+      const c = coins[i];
+      if (c.collected) continue;
+
+      const dx = c.x - carCX;
+      if (dx < -PICKUP_RADIUS || dx > PICKUP_RADIUS) continue;
+
+      const dy = c.y - carCY;
+      if (Math.hypot(dx, dy) <= PICKUP_RADIUS) {
+        c.collected = true;
+        c.popTimer = 0.22;
+        const isGem = (c.type === 'gem');
+        const val = isGem ? GEM_VALUE : COIN_VALUE;
+        levelCoinsCollected += val;
+        wallet += val;
+        saveWallet();
+        playCoinPickupSound(isGem);
+
+        const screenX = c.x - cam;
+        const screenY = c.y;
+
+        // 6 tiny gold sparkles
+        for (let s = 0; s < 6; s++) {
+          const spkAng = (s / 6) * Math.PI * 2 + (Math.random() * 0.4);
+          const spkSpeed = rnd(40, 110);
+          coinSparkles.push({
+            x: screenX,
+            y: screenY,
+            vx: Math.cos(spkAng) * spkSpeed,
+            vy: Math.sin(spkAng) * spkSpeed - 30,
+            life: 0.32,
+            maxLife: 0.32,
+            size: rnd(2.0, 3.8),
+            color: isGem ? '#38bdf8' : '#fde047'
+          });
+        }
+
+        // Flying coin animation to HUD
+        flyingCoins.push({
+          startX: screenX,
+          startY: screenY,
+          curX: screenX,
+          curY: screenY,
+          endX: W - 55,
+          endY: 50 + topInset,
+          t: 0,
+          dur: 0.35,
+          type: c.type
+        });
+
+        // Floating "+1" for first of every 5 coins, or "+5" for gem
+        if (isGem || (levelCoinsCollected % 5 === 1)) {
+          coinFloatTexts.push({
+            text: isGem ? '+5' : '+1',
+            x: carDrawX,
+            y: cy - 24,
+            timer: 0.65,
+            color: isGem ? '#38bdf8' : '#fde047'
+          });
+        }
+      }
+    }
   }
 
   if (st === 'ready') {
@@ -3891,10 +5541,20 @@ function drawHUD() {
     saveProgress(curLevel, highestLevel, best);
   }
 
-  // 1. Score in coin-pill style at top right (white text with dark outline), moved down by safe area
-  drawCoinPill(W - 105, 18 + topInset, 92, 32, currentTotal);
+  // 1. Score in score-pill style at top right with gold star badge
+  const scoreX = W - 98, scoreY = 12 + topInset, scoreW = 88, scoreH = 22;
+  drawScorePill(scoreX, scoreY, scoreW, scoreH, currentTotal);
 
-  // 2. Glossy Level Progress Bar, moved down by safe area
+  // 2. Wallet Coin Pill with glossy gold coin icon and total player coins
+  const coinPillX = W - 98, coinPillY = 38 + topInset, coinPillW = 88, coinPillH = 24;
+  drawWalletCoinPill(coinPillX, coinPillY, coinPillW, coinPillH, wallet, coinCounterBump);
+
+  // Coins collected in current level indicator "+N" in gold next to the coin pill
+  if (levelCoinsCollected > 0) {
+    drawGlossyText(`+${levelCoinsCollected}`, coinPillX - 6, coinPillY + coinPillH / 2 + 1, 13, 'right', '#fde047', '#713f12', 3.0);
+  }
+
+  // 3. Glossy Level Progress Bar, moved down by safe area
   const barX = 48, barY = 22 + topInset, barW = 190, barH = 18;
 
   ctx.save();
@@ -3943,7 +5603,7 @@ function drawSettingsPopup() {
   ctx.fillStyle = 'rgba(10, 15, 25, 0.65)';
   ctx.fillRect(0, 0, W, H);
 
-  const cw = 290, ch = 412;
+  const cw = 290, ch = 440;
   const cx = W / 2 - cw / 2, cy = H / 2 - ch / 2 - 10;
 
   ctx.shadowColor = 'rgba(0, 0, 0, 0.35)';
@@ -3969,22 +5629,55 @@ function drawSettingsPopup() {
   const isXPressed = (activePress === 'close_settings');
   drawRoundGlossyButton(cx + cw - 12, cy + 12, 17, BUTTON_THEMES.red, 'close', isXPressed);
 
-  const soundBtnX = cx + 24, soundBtnY = cy + 46, btnSz = 104;
+  // 1. Sound & Haptics buttons
+  const btnSz = 86;
+  const soundBtnX = cx + 24, soundBtnY = cy + 40;
   const isSoundPressed = (activePress === 'toggle_sound');
   const soundTheme = soundEnabled ? BUTTON_THEMES.green : BUTTON_THEMES.gray;
-  drawGlossyButton(soundBtnX, soundBtnY, btnSz, btnSz, soundTheme, null, soundEnabled ? 'sound_on' : 'sound_off', isSoundPressed, 18);
-  drawGlossyText('SOUND', soundBtnX + btnSz / 2, soundBtnY + 22, 15, 'center', '#ffffff', soundTheme.border, 3);
-  drawGlossyText(soundEnabled ? 'ON' : 'OFF', soundBtnX + btnSz / 2, soundBtnY + btnSz - 22, 17, 'center', soundEnabled ? '#ffffff' : '#cbd5e1', soundTheme.border, 3.8);
+  drawGlossyButton(soundBtnX, soundBtnY, btnSz, btnSz, soundTheme, null, soundEnabled ? 'sound_on' : 'sound_off', isSoundPressed, 16);
+  drawGlossyText('SOUND', soundBtnX + btnSz / 2, soundBtnY + 20, 14, 'center', '#ffffff', soundTheme.border, 3);
+  drawGlossyText(soundEnabled ? 'ON' : 'OFF', soundBtnX + btnSz / 2, soundBtnY + btnSz - 18, 16, 'center', soundEnabled ? '#ffffff' : '#cbd5e1', soundTheme.border, 3.5);
 
-  const vibBtnX = cx + cw - 24 - btnSz, vibBtnY = cy + 46;
+  const vibBtnX = cx + cw - 24 - btnSz, vibBtnY = cy + 40;
   const isVibPressed = (activePress === 'toggle_vibrate');
   const vibTheme = vibrateEnabled ? BUTTON_THEMES.green : BUTTON_THEMES.gray;
-  drawGlossyButton(vibBtnX, vibBtnY, btnSz, btnSz, vibTheme, null, vibrateEnabled ? 'vibrate_on' : 'vibrate_off', isVibPressed, 18);
-  drawGlossyText('HAPTICS', vibBtnX + btnSz / 2, vibBtnY + 22, 15, 'center', '#ffffff', vibTheme.border, 3);
-  drawGlossyText(vibrateEnabled ? 'ON' : 'OFF', vibBtnX + btnSz / 2, vibBtnY + btnSz - 22, 17, 'center', vibrateEnabled ? '#ffffff' : '#cbd5e1', vibTheme.border, 3.8);
+  drawGlossyButton(vibBtnX, vibBtnY, btnSz, btnSz, vibTheme, null, vibrateEnabled ? 'vibrate_on' : 'vibrate_off', isVibPressed, 16);
+  drawGlossyText('HAPTICS', vibBtnX + btnSz / 2, vibBtnY + 20, 14, 'center', '#ffffff', vibTheme.border, 3);
+  drawGlossyText(vibrateEnabled ? 'ON' : 'OFF', vibBtnX + btnSz / 2, vibBtnY + btnSz - 18, 16, 'center', vibrateEnabled ? '#ffffff' : '#cbd5e1', vibTheme.border, 3.5);
 
-  // START LEVEL STEPPER
-  const stepCardX = cx + 20, stepCardY = cy + 158, stepCardW = cw - 40, stepCardH = 54;
+  // 2. SPEED MODES CARD (Normal, Fast, Turbo)
+  const speedCardX = cx + 18, speedCardY = cy + 138, speedCardW = cw - 36, speedCardH = 64;
+  ctx.save();
+  ctx.fillStyle = '#f1f5f9';
+  roundRect(ctx, speedCardX, speedCardY, speedCardW, speedCardH, 14);
+  ctx.fill();
+  ctx.strokeStyle = '#cbd5e1';
+  ctx.lineWidth = 1.5;
+  roundRect(ctx, speedCardX, speedCardY, speedCardW, speedCardH, 14);
+  ctx.stroke();
+  ctx.restore();
+
+  drawGlossyText('SPEED', speedCardX + speedCardW / 2, speedCardY + 16, 11, 'center', '#64748b', '#0f172a', 2.0);
+
+  const spBtnW = 74, spBtnH = 32, spBtnY = speedCardY + 24;
+  const sp1X = speedCardX + 8;
+  const sp2X = sp1X + 82;
+  const sp3X = sp2X + 82;
+
+  const isNormPressed = (activePress === 'set_speed_normal');
+  const normTheme = (speedMode === 'normal') ? BUTTON_THEMES.blue : BUTTON_THEMES.gray;
+  drawGlossyButton(sp1X, spBtnY, spBtnW, spBtnH, normTheme, 'Normal', null, isNormPressed, 10);
+
+  const isFastPressed = (activePress === 'set_speed_fast');
+  const fastTheme = (speedMode === 'fast') ? BUTTON_THEMES.green : BUTTON_THEMES.gray;
+  drawGlossyButton(sp2X, spBtnY, spBtnW, spBtnH, fastTheme, 'Fast', null, isFastPressed, 10);
+
+  const isTurboPressed = (activePress === 'set_speed_turbo');
+  const turboTheme = (speedMode === 'turbo') ? BUTTON_THEMES.orange : BUTTON_THEMES.gray;
+  drawGlossyButton(sp3X, spBtnY, spBtnW, spBtnH, turboTheme, 'Turbo', null, isTurboPressed, 10);
+
+  // 3. START LEVEL STEPPER
+  const stepCardX = cx + 18, stepCardY = cy + 212, stepCardW = cw - 36, stepCardH = 50;
   ctx.save();
   ctx.fillStyle = '#f1f5f9';
   roundRect(ctx, stepCardX, stepCardY, stepCardW, stepCardH, 14);
@@ -3998,18 +5691,18 @@ function drawSettingsPopup() {
   const isMinusPressed = (activePress === 'dec_start_level');
   const canDec = curLevel > 1;
   const minusTheme = canDec ? BUTTON_THEMES.blue : BUTTON_THEMES.gray;
-  drawGlossyButton(stepCardX + 6, stepCardY + 7, 40, 40, minusTheme, '−', null, isMinusPressed, 12);
+  drawGlossyButton(stepCardX + 6, stepCardY + 6, 38, 38, minusTheme, '−', null, isMinusPressed, 12);
 
-  drawGlossyText('START LEVEL', stepCardX + stepCardW / 2, stepCardY + 16, 11, 'center', '#64748b', '#0f172a', 2.0);
-  drawGlossyText('Level ' + curLevel, stepCardX + stepCardW / 2, stepCardY + 39, 19, 'center', '#0f172a', '#ffffff', 2.8);
+  drawGlossyText('START LEVEL', stepCardX + stepCardW / 2, stepCardY + 15, 11, 'center', '#64748b', '#0f172a', 2.0);
+  drawGlossyText('Level ' + curLevel, stepCardX + stepCardW / 2, stepCardY + 36, 18, 'center', '#0f172a', '#ffffff', 2.8);
 
   const isPlusPressed = (activePress === 'inc_start_level');
   const canInc = curLevel < highestLevel;
   const plusTheme = canInc ? BUTTON_THEMES.blue : BUTTON_THEMES.gray;
-  drawGlossyButton(stepCardX + stepCardW - 6 - 40, stepCardY + 7, 40, 40, plusTheme, '+', null, isPlusPressed, 12);
+  drawGlossyButton(stepCardX + stepCardW - 6 - 38, stepCardY + 6, 38, 38, plusTheme, '+', null, isPlusPressed, 12);
 
-  // ALLOY RIM CUSTOMIZER CARD
-  const rimCardX = cx + 20, rimCardY = cy + 220, rimCardW = cw - 40, rimCardH = 54;
+  // 4. ALLOY RIM CUSTOMIZER CARD
+  const rimCardX = cx + 18, rimCardY = cy + 270, rimCardW = cw - 36, rimCardH = 50;
   const isRimPressed = (activePress === 'cycle_rim_style');
   ctx.save();
   ctx.fillStyle = isRimPressed ? '#e2e8f0' : '#f1f5f9';
@@ -4021,34 +5714,35 @@ function drawSettingsPopup() {
   ctx.stroke();
 
   // Mini wheel icon on left
-  drawButtonIcon('wheel', rimCardX + 26, rimCardY + 27, 34);
+  drawButtonIcon('wheel', rimCardX + 24, rimCardY + 25, 30);
 
   // Rim name & label
   const curRimCfg = RIM_STYLE_CONFIGS[currentRimStyle] || RIM_STYLE_CONFIGS.silver_sport;
-  drawGlossyText('ALLOY RIM', rimCardX + 54, rimCardY + 16, 11, 'left', '#64748b', '#0f172a', 2.0);
-  drawGlossyText(curRimCfg.name, rimCardX + 54, rimCardY + 39, 16, 'left', '#0f172a', '#ffffff', 2.6);
+  drawGlossyText('ALLOY RIM', rimCardX + 48, rimCardY + 15, 11, 'left', '#64748b', '#0f172a', 2.0);
+  drawGlossyText(`🪙 ${wallet}`, rimCardX + rimCardW - pillW - 14, rimCardY + 15, 11, 'right', '#eab308', '#713f12', 2.2);
+  drawGlossyText(curRimCfg.name, rimCardX + 48, rimCardY + 36, 15, 'left', '#0f172a', '#ffffff', 2.6);
 
   // Switch pill button on right
-  const pillW = 66, pillH = 34;
-  drawGlossyButton(rimCardX + rimCardW - pillW - 8, rimCardY + 10, pillW, pillH, BUTTON_THEMES.purple, 'CHANGE', null, isRimPressed, 10);
+  const pillW = 64, pillH = 32;
+  drawGlossyButton(rimCardX + rimCardW - pillW - 6, rimCardY + 9, pillW, pillH, BUTTON_THEMES.purple, 'CHANGE', null, isRimPressed, 10);
   ctx.restore();
 
-  // Reset Progress Section
+  // 5. Reset Progress Section
   if (!resetConfirming) {
-    const rBtnW = 168, rBtnH = 34;
-    const rBtnX = cx + (cw - rBtnW) / 2, rBtnY = cy + 288;
+    const rBtnW = 168, rBtnH = 32;
+    const rBtnX = cx + (cw - rBtnW) / 2, rBtnY = cy + 332;
     const isResetPressed = (activePress === 'ask_reset_progress');
     drawGlossyButton(rBtnX, rBtnY, rBtnW, rBtnH, BUTTON_THEMES.red, 'Reset progress', null, isResetPressed, 13);
     const maxHint = (highestLevel > 1) ? `Highest unlocked: Level ${highestLevel}` : 'Tap CHANGE to switch rims';
     drawGlossyText(maxHint, W / 2, cy + ch - 16, 11.5, 'center', '#64748b', '#0f172a', 2.2);
   } else {
-    drawGlossyText('Are you sure?', W / 2, cy + 284, 15, 'center', '#ef4444', '#450a0a', 3.5);
-    const confH = 34;
-    const yesW = 98, yesX = cx + 32, yesY = cy + 306;
+    drawGlossyText('Are you sure?', W / 2, cy + 330, 15, 'center', '#ef4444', '#450a0a', 3.5);
+    const confH = 32;
+    const yesW = 98, yesX = cx + 32, yesY = cy + 352;
     const isYesPressed = (activePress === 'confirm_reset_progress');
     drawGlossyButton(yesX, yesY, yesW, confH, BUTTON_THEMES.red, 'Yes, reset', null, isYesPressed, 12);
 
-    const noW = 98, noX = cx + cw - 32 - noW, noY = cy + 306;
+    const noW = 98, noX = cx + cw - 32 - noW, noY = cy + 352;
     const isNoPressed = (activePress === 'cancel_reset_progress');
     drawGlossyButton(noX, noY, noW, confH, BUTTON_THEMES.gray, 'Cancel', null, isNoPressed, 12);
 
@@ -4097,8 +5791,9 @@ function drawLevelCompletePopup() {
   drawGoldStar(W / 2 + 45, cy + 62, 18);
 
   const totalScore = 100 * lvlNum;
-  drawGlossyText(`+100 PTS!`, W / 2, cy + 115, 26, 'center', '#ffffff', '#0f172a', 5);
-  drawGlossyText(`Total Score: ${totalScore}`, W / 2, cy + 148, 16, 'center', '#ffffff', '#0f172a', 3.5);
+  drawGlossyText(`+100 PTS!`, W / 2, cy + 104, 24, 'center', '#ffffff', '#0f172a', 4.5);
+  drawGlossyText(`+${levelCoinsCollected} Coins Collected!`, W / 2, cy + 130, 15, 'center', '#fde047', '#713f12', 3.0);
+  drawGlossyText(`Total Score: ${totalScore}  •  Coins: ${wallet}`, W / 2, cy + 152, 13, 'center', '#ffffff', '#0f172a', 2.6);
 
   const btnW = 210, btnH = 54;
   const isNextPressed = (activePress === 'next_level');
@@ -4153,8 +5848,17 @@ function drawCrashPopup() {
   ctx.restore();
 }
 
-function drawGameContent() {
+function drawGameContent(dt = 0.016) {
   const cfg = curConfig;
+
+  // Very small camera shake (at most 1 px) only in Turbo during active play
+  let shakeX = 0, shakeY = 0;
+  if (speedMode === 'turbo' && st === 'play' && finishRunStage === 'none' && !stopping) {
+    shakeX = (Math.random() * 2 - 1) * 1.0;
+    shakeY = (Math.random() * 2 - 1) * 1.0;
+    ctx.save();
+    ctx.translate(shakeX, shakeY);
+  }
 
   // 1. Picture background (or fallback procedural)
   drawBackground();
@@ -4239,6 +5943,73 @@ function drawGameContent() {
     }
   }
 
+  // 5b. Collectible Coins and Gems
+  const animFrame = Math.floor((gameTime * 10) % 8);
+
+  for (let i = 0; i < coins.length; i++) {
+    const c = coins[i];
+    const screenX = c.x - cam;
+    if (screenX < -50 || screenX > W + 50) continue;
+
+    if (!c.collected) {
+      const f = Math.floor((gameTime * 10 + c.phase) % 8);
+      const spr = (c.type === 'gem') ? gemFrames[f] : coinFrames[f];
+      if (spr) {
+        ctx.drawImage(spr, screenX - spr.width / 2, c.y - spr.height / 2);
+      }
+    } else if (c.popTimer > 0) {
+      const popK = c.popTimer / 0.22;
+      const popScale = 1.0 + (1 - popK) * 0.6;
+      const spr = (c.type === 'gem') ? gemFrames[0] : coinFrames[0];
+      if (spr) {
+        ctx.save();
+        ctx.globalAlpha = popK;
+        ctx.translate(screenX, c.y);
+        ctx.scale(popScale, popScale);
+        ctx.drawImage(spr, -spr.width / 2, -spr.height / 2);
+        ctx.restore();
+      }
+    }
+  }
+
+  // Draw Coin Sparkles
+  for (let i = 0; i < coinSparkles.length; i++) {
+    const spk = coinSparkles[i];
+    const alpha = Math.max(0, spk.life / spk.maxLife);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = spk.color;
+    ctx.shadowColor = spk.color;
+    ctx.shadowBlur = 4;
+    ctx.beginPath();
+    ctx.arc(spk.x, spk.y, spk.size, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // Draw Flying Coins
+  for (let i = 0; i < flyingCoins.length; i++) {
+    const fc = flyingCoins[i];
+    const spr = (fc.type === 'gem') ? gemFrames[animFrame] : coinFrames[animFrame];
+    if (spr) {
+      ctx.save();
+      ctx.shadowColor = fc.type === 'gem' ? '#0284c7' : '#eab308';
+      ctx.shadowBlur = 6;
+      ctx.drawImage(spr, fc.curX - spr.width / 2, fc.curY - spr.height / 2);
+      ctx.restore();
+    }
+  }
+
+  // Draw Floating Texts (+1, +5)
+  for (let i = 0; i < coinFloatTexts.length; i++) {
+    const ft = coinFloatTexts[i];
+    const alpha = Math.min(1, ft.timer / 0.3);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    drawGlossyText(ft.text, ft.x, ft.y, 16, 'center', ft.color, '#0f172a', 3.8);
+    ctx.restore();
+  }
+
   // 6. Sky Car (thin dark outline + soft shadow)
   if (st === 'ready') {
     const menuAlpha = Math.min(1, menuFadeTimer / 0.3);
@@ -4248,6 +6019,14 @@ function drawGameContent() {
     ctx.restore();
   } else {
     car(carDrawX);
+  }
+
+  // Thin horizontal speed lines in the stage's accent color
+  const curStage = getStage(curLevel);
+  updateAndDrawSpeedLines(dt, speed(), curStage);
+
+  if (shakeX !== 0 || shakeY !== 0) {
+    ctx.restore();
   }
 
   // 7. UI and Screens (all HUD text in white with dark outline)
@@ -4285,8 +6064,9 @@ function drawGameContent() {
     ctx.save();
     ctx.globalAlpha = menuAlpha;
 
-    // Top Right: Coin-counter pill with gold star coin and best score (moved down by topInset)
-    drawCoinPill(W - 120, 24 + topInset, 106, 34, best, true);
+    // Top Right: Best score pill with gold star badge and Wallet Coin pill with gold coin
+    drawScorePill(W - 110, 16 + topInset, 98, 26, best, true);
+    drawWalletCoinPill(W - 110, 48 + topInset, 98, 26, wallet);
 
     // Title Logo
     drawGlossyText('THORN RUSH', W / 2, 120 + topInset * 0.6, 46, 'center', '#ffffff', '#0f172a', 8);
@@ -4337,7 +6117,7 @@ function drawGameContent() {
   }
 }
 
-function draw() {
+function draw(dt = 0.016) {
   ctx.save();
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.imageSmoothingEnabled = true;
@@ -4355,7 +6135,7 @@ function draw() {
     return;
   }
 
-  drawGameContent();
+  drawGameContent(dt);
   ctx.restore();
 }
 
@@ -4365,7 +6145,7 @@ function loop(t) {
   last = t;
   const dt = Math.max(0.001, Math.min(0.1, rawDt || 0.016));
   step(dt);
-  draw();
+  draw(dt);
   requestAnimationFrame(loop);
 }
 
@@ -4398,33 +6178,54 @@ function handlePointerDown(e) {
   if (st === 'loading') return;
 
   if (settingsOpen) {
-    const cw = 290, ch = 356;
+    const cw = 290, ch = 440;
     const cx = W / 2 - cw / 2, cy = H / 2 - ch / 2 - 10;
 
     if (inCircle(x, y, cx + cw - 12, cy + 12, 24)) {
       activePress = 'close_settings';
       return;
     }
-    const soundBtnX = cx + 24, soundBtnY = cy + 50, btnSz = 104;
+    const btnSz = 86;
+    const soundBtnX = cx + 24, soundBtnY = cy + 40;
     if (inBox(x, y, soundBtnX, soundBtnY, btnSz, btnSz)) {
       activePress = 'toggle_sound';
       return;
     }
-    const vibBtnX = cx + cw - 24 - btnSz, vibBtnY = cy + 50;
+    const vibBtnX = cx + cw - 24 - btnSz, vibBtnY = cy + 40;
     if (inBox(x, y, vibBtnX, vibBtnY, btnSz, btnSz)) {
       activePress = 'toggle_vibrate';
       return;
     }
 
+    // SPEED BUTTONS: Normal, Fast, Turbo
+    const speedCardX = cx + 18, speedCardY = cy + 138, speedCardW = cw - 36, speedCardH = 64;
+    const spBtnW = 74, spBtnH = 32, spBtnY = speedCardY + 24;
+    const sp1X = speedCardX + 8;
+    const sp2X = sp1X + 82;
+    const sp3X = sp2X + 82;
+
+    if (inBox(x, y, sp1X, spBtnY, spBtnW, spBtnH)) {
+      activePress = 'set_speed_normal';
+      return;
+    }
+    if (inBox(x, y, sp2X, spBtnY, spBtnW, spBtnH)) {
+      activePress = 'set_speed_fast';
+      return;
+    }
+    if (inBox(x, y, sp3X, spBtnY, spBtnW, spBtnH)) {
+      activePress = 'set_speed_turbo';
+      return;
+    }
+
     // Stepper minus & plus buttons
-    const stepCardX = cx + 20, stepCardY = cy + 158, stepCardW = cw - 40, stepCardH = 54;
-    if (inBox(x, y, stepCardX + 2, stepCardY + 2, 48, 50)) {
+    const stepCardX = cx + 18, stepCardY = cy + 212, stepCardW = cw - 36, stepCardH = 50;
+    if (inBox(x, y, stepCardX + 2, stepCardY + 2, 46, 46)) {
       if (curLevel > 1) {
         activePress = 'dec_start_level';
         return;
       }
     }
-    if (inBox(x, y, stepCardX + stepCardW - 50, stepCardY + 2, 48, 50)) {
+    if (inBox(x, y, stepCardX + stepCardW - 48, stepCardY + 2, 46, 46)) {
       if (curLevel < highestLevel) {
         activePress = 'inc_start_level';
         return;
@@ -4432,27 +6233,27 @@ function handlePointerDown(e) {
     }
 
     // Alloy Rim customizer card
-    const rimCardX = cx + 20, rimCardY = cy + 220, rimCardW = cw - 40, rimCardH = 54;
+    const rimCardX = cx + 18, rimCardY = cy + 270, rimCardW = cw - 36, rimCardH = 50;
     if (inBox(x, y, rimCardX, rimCardY, rimCardW, rimCardH)) {
       activePress = 'cycle_rim_style';
       return;
     }
 
     if (!resetConfirming) {
-      const rBtnW = 168, rBtnH = 34;
-      const rBtnX = cx + (cw - rBtnW) / 2, rBtnY = cy + 288;
+      const rBtnW = 168, rBtnH = 32;
+      const rBtnX = cx + (cw - rBtnW) / 2, rBtnY = cy + 332;
       if (inBox(x, y, rBtnX, rBtnY, rBtnW, rBtnH)) {
         activePress = 'ask_reset_progress';
         return;
       }
     } else {
-      const confH = 34;
-      const yesW = 98, yesX = cx + 32, yesY = cy + 306;
+      const confH = 32;
+      const yesW = 98, yesX = cx + 32, yesY = cy + 352;
       if (inBox(x, y, yesX, yesY, yesW, confH)) {
         activePress = 'confirm_reset_progress';
         return;
       }
-      const noW = 98, noX = cx + cw - 32 - noW, noY = cy + 306;
+      const noW = 98, noX = cx + cw - 32 - noW, noY = cy + 352;
       if (inBox(x, y, noX, noY, noW, confH)) {
         activePress = 'cancel_reset_progress';
         return;
@@ -4549,6 +6350,18 @@ function handlePointerUp(e) {
     } else if (activePress === 'toggle_vibrate') {
       setVibrate(!vibrateEnabled);
       if (vibrateEnabled) triggerVibrate(40);
+    } else if (activePress === 'set_speed_normal') {
+      setSpeedMode('normal');
+      triggerVibrate(30);
+      showToast('Speed: NORMAL (1.0x)');
+    } else if (activePress === 'set_speed_fast') {
+      setSpeedMode('fast');
+      triggerVibrate(30);
+      showToast('Speed: FAST (1.7x)');
+    } else if (activePress === 'set_speed_turbo') {
+      setSpeedMode('turbo');
+      triggerVibrate(40);
+      showToast('Speed: TURBO (2.3x)');
     } else if (activePress === 'ask_reset_progress') {
       resetConfirming = true;
     } else if (activePress === 'cancel_reset_progress') {
@@ -4639,6 +6452,11 @@ window.addEventListener('keyup', e => {
 });
 window.addEventListener('resize', () => {
   resizeCanvas();
+  prerenderVignette();
+  prerenderStageBackgrounds();
+  prerenderCoinFrames();
+  initSpeedLines();
+  initStageParticles();
   if (curConfig) {
     prerenderSpikes(curConfig);
     prerenderFallbackScene(curConfig);
@@ -4648,7 +6466,18 @@ window.addEventListener('resize', () => {
   }
 });
 
+loadSpeedSetting();
+updateSpeedPhysics();
 loadProgress();
+loadWallet();
+currentBgStage = getStageNumber(curLevel);
+prevBgStage = currentBgStage;
+bgCrossFadeTimer = 0;
+prerenderVignette();
+prerenderStageBackgrounds();
+prerenderCoinFrames();
+initSpeedLines();
+initStageParticles();
 startLevel(curLevel);
 step(0);
 draw();
