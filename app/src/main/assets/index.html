@@ -48,6 +48,129 @@ let H = 640;
 const rnd = (a, b) => a + Math.random() * (b - a);
 
 // ==========================================
+// STAGES (5 Levels Per Stage)
+// ==========================================
+const LEVELS_PER_STAGE = 5;
+
+const STAGES = [
+  {
+    name: 'Desert Highway',
+    gradientTop: '#ffb15c',
+    gradientBottom: '#7a2e1a',
+    accent: '#ff8a1f',
+    silhouetteSet: 'mesas and rock arches',
+    particleType: 'dust',
+    spikeStyle: 'steel cone studs',
+    railColor: '#5a4a3a',
+    backgroundPicture: ''
+  },
+  {
+    name: 'Neon City',
+    gradientTop: '#0b1f33',
+    gradientBottom: '#3b0f4a',
+    accent: '#19e3ff',
+    accentSecondary: '#ff3fb0',
+    silhouetteSet: 'skyscrapers with neon signs',
+    particleType: 'rain',
+    spikeStyle: 'glowing blade spikes',
+    railColor: '#1a2a44',
+    backgroundPicture: ''
+  },
+  {
+    name: 'Frozen Peaks',
+    gradientTop: '#cfe8ff',
+    gradientBottom: '#7aa7d9',
+    accent: '#8fe3ff',
+    silhouetteSet: 'mountain ridges',
+    particleType: 'snow',
+    spikeStyle: 'ice crystal spikes',
+    railColor: '#4a6a8a',
+    backgroundPicture: ''
+  },
+  {
+    name: 'Volcano Wasteland',
+    gradientTop: '#2a0a0a',
+    gradientBottom: '#ff4a1a',
+    accent: '#ff6a1a',
+    silhouetteSet: 'jagged volcano cliffs',
+    particleType: 'embers',
+    spikeStyle: 'black rock spikes with glowing tips',
+    railColor: '#2a1a1a',
+    backgroundPicture: ''
+  },
+  {
+    name: 'Cyber Factory',
+    gradientTop: '#1d2b3a',
+    gradientBottom: '#3b5368',
+    accent: '#ffd21a',
+    silhouetteSet: 'pipes, cranes and tanks',
+    particleType: 'sparks',
+    spikeStyle: 'yellow saw-tooth and fork spikes',
+    railColor: '#3a4a5a',
+    backgroundPicture: ''
+  },
+  {
+    name: 'Alien Jungle',
+    gradientTop: '#1a0f3a',
+    gradientBottom: '#0f5a46',
+    accent: '#b46bff',
+    silhouetteSet: 'giant plants and two moons',
+    particleType: 'glowing spores',
+    spikeStyle: 'thorn and claw spikes',
+    railColor: '#2a1a4a',
+    backgroundPicture: ''
+  },
+  {
+    name: 'Deep Ocean Ruins',
+    gradientTop: '#04323f',
+    gradientBottom: '#02131a',
+    accent: '#34e0c8',
+    silhouetteSet: 'sunken ruins and rock towers',
+    particleType: 'bubbles',
+    spikeStyle: 'coral spikes',
+    railColor: '#0f3a44',
+    backgroundPicture: ''
+  },
+  {
+    name: 'Space Station',
+    gradientTop: '#02040f',
+    gradientBottom: '#0b1030',
+    accent: '#9a6bff',
+    silhouetteSet: 'a big planet and station struts',
+    particleType: 'floating dust',
+    spikeStyle: 'energy crystal spikes',
+    railColor: '#1a1f3a',
+    backgroundPicture: ''
+  }
+];
+
+function getStageNumber(level) {
+  return Math.floor((level - 1) / LEVELS_PER_STAGE) + 1;
+}
+
+function getLevelInStage(level) {
+  return ((level - 1) % LEVELS_PER_STAGE) + 1;
+}
+
+function getStage(level) {
+  const stageNum = getStageNumber(level);
+  const idx = (stageNum - 1) % STAGES.length;
+  return STAGES[idx];
+}
+
+function getStageMenuText(level) {
+  const stageNum = getStageNumber(level);
+  const stage = getStage(level);
+  return `STAGE ${stageNum} - ${stage.name.toUpperCase()}`;
+}
+
+function getLevelTitleCardText(level) {
+  const stageNum = getStageNumber(level);
+  const lvlInStage = getLevelInStage(level);
+  return `STAGE ${stageNum} - LEVEL ${lvlInStage}/${LEVELS_PER_STAGE}`;
+}
+
+// ==========================================
 // TUNING CONSTANTS (Scale, Speed, Physics, SFX)
 // ==========================================
 const SFX_VOLUME = 0.8;
@@ -57,9 +180,10 @@ const SPEED_MULTIPLIER = 1.0;
 const VERTICAL_RESPONSE = 1.0;
 const SHOW_DEBUG = false;
 
-const THRUST_RISE_TIME = 0.10;
-const THRUST_FALL_TIME = 0.25;
-const AIR_DRAG = 1.2;
+// Physics Response: balanced and agile (not sluggish, not floaty)
+const THRUST_RISE_TIME = 0.09;
+const THRUST_FALL_TIME = 0.20;
+const AIR_DRAG = 1.1;
 
 const CAR_SCALE = 2.0;
 const CAR_X = 140;
@@ -71,10 +195,10 @@ const HITBOX_BOT_OFFSET = 11 * CAR_SCALE;
 const CAR_HITBOX_H = HITBOX_TOP_OFFSET + HITBOX_BOT_OFFSET; // 40px
 
 // Vertical Handling in canvas-height units (H = canvas height)
-let LIFT_ACCEL = 0.45 * H * VERTICAL_RESPONSE;
-let GRAVITY = 0.28 * H * VERTICAL_RESPONSE;
-let MAX_UP_SPEED = 0.13 * H * VERTICAL_RESPONSE;
-let MAX_DOWN_SPEED = 0.10 * H * VERTICAL_RESPONSE;
+let LIFT_ACCEL = 0.65 * H * VERTICAL_RESPONSE;
+let GRAVITY = 0.40 * H * VERTICAL_RESPONSE;
+let MAX_UP_SPEED = 0.15 * H * VERTICAL_RESPONSE;
+let MAX_DOWN_SPEED = 0.13 * H * VERTICAL_RESPONSE;
 
 const ROAD_LANE_H = 36;
 let ROAD_TOP = 400;
@@ -99,40 +223,58 @@ const lerp = (a, b, t) => a + (b - a) * t;
 
 // ==========================================
 // DIFFICULTY PROGRESSION TUNING CONSTANTS
+// Balanced: engaging and fun — neither boringly easy nor unfairly difficult
 // ==========================================
-const BASE_SCROLL_SPEED_RATIO = 0.30;   // Level 1 scroll speed = 0.30 * W
-const SCROLL_SPEED_GROWTH = 0.25;       // Speed multiplier = 1 + 0.25 * f
-const GAP_LEVEL_1_RATIO = 4.4;          // Level 1 gap = 4.4 * carH
-const GAP_MAX_DIFFICULTY_RATIO = 3.0;   // Max difficulty gap = 3.0 * carH (never below 3.0 * carH)
-const STEP_MIN_RATIO = 0.15;            // Step ratio at level 1 (15% of max fair step)
-const STEP_MAX_RATIO = 0.50;            // Step ratio at high levels
-const SEG_LEN_LEVEL_1_RATIO = 1.30;     // Segment length ratio at level 1 (1.3 * base)
-const SEG_LEN_MAX_RATIO = 1.00;         // Segment length ratio at high difficulty (1.0 * base)
-const BASE_SEGMENT_LEN = 280;           // Base segment length in pixels (never shorter than base)
-const INTRA_LEVEL_GROWTH = 0.12;        // Difficulty rises gently inside each level
-const INTRA_LEVEL_EASY_FRACTION = 0.20; // First 20% of each level starts easier
-const SQUEEZE_GAP_RATIO = 2.9;          // Squeeze section gap = 2.9 * carH (only from level 10)
-const MOVE_RAIL_AMP_MIN = 8;            // Moving rail min amplitude in px
-const MOVE_RAIL_AMP_MAX = 20;           // Moving rail max amplitude in px (at most 0.5 * carH = 20px)
-const MOVE_RAIL_SPEED_SLOW = 0.8;       // Moving rail slow speed (only from level 14)
-const MOVE_RAIL_SPEED_FAST = 1.3;       // Moving rail fast speed
+const LEVEL_GROWTH_TAU = 16.0;          // Smooth curve designed for 30-50 continuous levels
+const BASE_SCROLL_SPEED_RATIO = 0.31;   // Balanced engaging speed (~112 px/s)
+const SCROLL_SPEED_GROWTH = 0.35;       // Speed multiplier = 1 + 0.35 * f
+const GAP_LEVEL_1_RATIO = 3.65;         // Level 1 gap = 3.65 * carH (~146px, roomy & fair, but requires steering)
+const GAP_MAX_DIFFICULTY_RATIO = 2.65;  // Max difficulty gap = 2.65 * carH (~106px, never unfair)
+const STEP_MIN_RATIO = 0.28;            // Step dynamic range at level 1 (pleasant gentle undulations)
+const STEP_MAX_RATIO = 0.58;            // Step dynamic range at high levels (lively but fair)
+const SEG_LEN_LEVEL_1_RATIO = 1.15;     // Segment length ratio at level 1 (1.15 * base)
+const SEG_LEN_MAX_RATIO = 0.88;         // Segment length ratio at high difficulty
+const BASE_SEGMENT_LEN = 240;           // Base segment length in pixels
+const INTRA_LEVEL_GROWTH = 0.14;        // Difficulty rises gently inside each level
+const INTRA_LEVEL_EASY_FRACTION = 0.15; // First 15% of each level starts easier
+const SQUEEZE_GAP_RATIO = 2.85;         // Squeeze section gap = 2.85 * carH
+const MOVE_RAIL_AMP_MIN = 12;           // Moving rail min amplitude in px
+const MOVE_RAIL_AMP_MAX = 24;           // Moving rail max amplitude in px
+const MOVE_RAIL_SPEED_SLOW = 0.9;
+const MOVE_RAIL_SPEED_FAST = 1.4;
 
 const START_ROAD_START = -100, START_ROAD_END = 500;
 const TUNNEL_START_X = START_ROAD_END;
-const TUNNEL_LENGTH = 1400;
-const TUNNEL_END_X = TUNNEL_START_X + TUNNEL_LENGTH;
+
+// Dynamic level stage length
+const LEVEL_BASE_WIDTHS = 12;
+const LEVEL_GROWTH = 0.35;
+const LEVEL_MAX_EXTRA = 8;
+
+function getTunnelLength(lvl) {
+  const L = lvl || 1;
+  const extra = Math.min(LEVEL_MAX_EXTRA, LEVEL_GROWTH * (L - 1));
+  return Math.round((LEVEL_BASE_WIDTHS + extra) * W);
+}
+
+let TUNNEL_LENGTH = getTunnelLength(1);
+let TUNNEL_END_X = TUNNEL_START_X + TUNNEL_LENGTH;
 const CALM_OPEN_GAP = 300;
 
-// Long finish road, checkered finish line, and stopping constants
-const FINISH_ROAD_LENGTH = 2.4 * W;
-const FINISH_LINE_AT = 0.55;
+// Long finish road, cheering character, checkered finish line, and stopping constants
+const FINISH_RUN_SPEED = 1.25 * W;     // fast thrilling scroll speed during finish run (px/s)
+const ROAD_END_STOP_X = 0.96 * W;     // screen X where road safety rail stops
+const FINISH_LINE_X = 0.70 * W;       // screen X where finish line is positioned
+const CAR_STOP_FRONT_X = 0.82 * W;    // screen X where front of car stops
+const CHARACTER_X = 0.89 * W;         // screen X where cheering character stands
+
+const FINISH_ROAD_LENGTH = 2.0 * W;
 const STOP_TIME = 1.3;
 
-const FINISH_ROAD_LEN = FINISH_ROAD_LENGTH;
-const FINISH_ROAD_X = TUNNEL_END_X + CALM_OPEN_GAP;
-const FINISH_ROAD_END = FINISH_ROAD_X + FINISH_ROAD_LENGTH;
-const FINISH_LINE_X = FINISH_ROAD_X + FINISH_ROAD_LENGTH * FINISH_LINE_AT;
-const LEVEL_LENGTH = FINISH_LINE_X - CAR_X;
+let FINISH_ROAD_LEN = FINISH_ROAD_LENGTH;
+let FINISH_ROAD_X = TUNNEL_END_X + CALM_OPEN_GAP;
+let FINISH_ROAD_END = FINISH_ROAD_X + FINISH_ROAD_LENGTH;
+let LEVEL_LENGTH = FINISH_ROAD_X - CAR_X;
 
 const RETRY_FROM_LEVEL_START = true;
 
@@ -929,7 +1071,7 @@ function playSinglePuff(isInitial = false) {
 }
 
 function updateThrustAudio(dt) {
-  const isThrustActive = (st === 'play' && hold && !autoLanding && !stopping && !settingsOpen);
+  const isThrustActive = (st === 'play' && hold && finishRunStage === 'none' && !stopping && !settingsOpen);
 
   if (!soundEnabled || !isThrustActive) {
     wasThrustActive = false;
@@ -1012,6 +1154,28 @@ function playCrashSound() {
   } catch(e) {}
 }
 
+function playLaunchSpinSound() {
+  if (!soundEnabled) return;
+  initAudio();
+  if (!audioCtx) return;
+  try {
+    const now = audioCtx.currentTime;
+    const osc = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(320, now);
+    osc.frequency.exponentialRampToValueAtTime(960, now + 0.32);
+    osc.frequency.exponentialRampToValueAtTime(420, now + 0.65);
+    g.gain.setValueAtTime(0.01, now);
+    g.gain.linearRampToValueAtTime(0.24, now + 0.18);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 0.65);
+    osc.connect(g);
+    g.connect(masterGain);
+    osc.start(now);
+    osc.stop(now + 0.65);
+  } catch(e) {}
+}
+
 function playWinSound() {
   triggerVibrate([40, 50, 40, 50, 90]);
   if (!soundEnabled) return;
@@ -1039,17 +1203,6 @@ function playWinSound() {
 // ==========================================
 // PROCEDURAL LEVEL CONFIG & FALLBACK SCENES
 // ==========================================
-const SCENE_NAMES = [
-  'Sky Town',
-  'Beach Town',
-  'Candy Land',
-  'Snow Village',
-  'Desert Oasis',
-  'Jungle Temple',
-  'Space Station',
-  'Underwater City'
-];
-
 const SHAPE_TYPES = [
   'cone', 'needle', 'fat stud', 'double-cone', 'faceted crystal',
   'curved thorn', 'fork', 'saw tooth', 'bullet', 'flame-shaped'
@@ -1057,43 +1210,44 @@ const SHAPE_TYPES = [
 const RAIL_STYLES = ['rivets', 'bolts', 'small gears', 'chain links', 'dots'];
 
 function getSceneType(level) {
-  return (level - 1) % 8;
+  return (getStageNumber(level) - 1) % STAGES.length;
 }
 
 function generateLevelConfig(level, prev) {
   const sceneId = getSceneType(level);
+  const stage = getStage(level);
   const seed = hashInt(level * 10007 + 773);
   const rng = mulberry32(seed);
   const pick = arr => arr[Math.floor(rng() * arr.length)];
   const range = (a, b) => a + rng() * (b - a);
 
   let H = Math.round((level * 137.508) % 360);
-  const name = SCENE_NAMES[sceneId] + (level > 8 ? ` ${Math.floor((level - 1) / 8) + 1}` : '');
+  const name = stage.name;
 
   let bgTop, bgBot, cloudColor;
   switch (sceneId) {
-    case 0: // Sky Town
+    case 0:
       bgTop = '#48cae4'; bgBot = '#caf0f8'; cloudColor = '#ffffff'; H = 195;
       break;
-    case 1: // Beach Town
+    case 1:
       bgTop = '#00b4d8'; bgBot = '#ffd166'; cloudColor = '#ffffff'; H = 45;
       break;
-    case 2: // Candy Land
+    case 2:
       bgTop = '#ff70a6'; bgBot = '#ffd670'; cloudColor = '#fff0f5'; H = 330;
       break;
-    case 3: // Snow Village
+    case 3:
       bgTop = '#7097c2'; bgBot = '#dceaf7'; cloudColor = '#ffffff'; H = 210;
       break;
-    case 4: // Desert Oasis
+    case 4:
       bgTop = '#f77f00'; bgBot = '#fcbf49'; cloudColor = '#fff5eb'; H = 35;
       break;
-    case 5: // Jungle Temple
+    case 5:
       bgTop = '#2ec4b6'; bgBot = '#cbf3f0'; cloudColor = '#f0fff4'; H = 150;
       break;
-    case 6: // Space Station
+    case 6:
       bgTop = '#240046'; bgBot = '#7b2cbf'; cloudColor = '#ff9e00'; H = 275;
       break;
-    case 7: // Underwater City
+    case 7:
       bgTop = '#023e8a'; bgBot = '#0096c7'; cloudColor = '#90e0ef'; H = 190;
       break;
   }
@@ -1147,21 +1301,12 @@ function getLevelConfig(level) {
   return cfg;
 }
 
-// Check if an actual custom background picture exists for this scene
-const REAL_SCENE_PICTURES = {
-  'Sky Town': 'image_39e1ec82.png'
-};
-
 function hasRealScenePicture(level, cfg) {
-  // Only Level 1 has an authentic dedicated background picture asset (Sky Town image_39e1ec82.png)
-  return level === 1 && !!cfg && (cfg.name === 'Sky Town' || cfg.name.startsWith('Sky Town'));
+  return level === 1;
 }
 
 function getLevelDisplayText(level, cfg) {
-  if (hasRealScenePicture(level, cfg)) {
-    return `LEVEL ${level}: ${cfg.name.toUpperCase()}`;
-  }
-  return `LEVEL ${level}`;
+  return getLevelTitleCardText(level);
 }
 
 let curConfig = getLevelConfig(1);
@@ -1672,6 +1817,21 @@ let levelCompleteTimer = 0;
 let levelJustCleared = 1;
 let autoLanding = false;
 let landingStartY = CAR_REST_Y;
+let safetyLanding = false;
+let safetyLandingStartY = CAR_REST_Y;
+let safetyLandingTimer = 0;
+let hasTouchedDown = false;
+let finishRunStage = 'none'; // 'none' | 'speed_run' | 'scroll_stopping' | 'car_driving' | 'car_stopped'
+let finishRunTimer = 0;
+let landingScrollSpeed = 0;
+let scrollStopTimer = 0;
+let camEaseStart = 0;
+let camEaseDist = 0;
+let carDriveTimer = 0;
+let thumbsUpTimer = 0;
+let confettiStarted = false;
+let levelCompleted = false;
+let carDrawX = CAR_X;
 let confettis = [];
 let activePress = null;
 let resetConfirming = false;
@@ -1746,11 +1906,11 @@ function getDifficultyDistance() {
 }
 
 // 1. Difficulty Growth:
-// f = 1 - exp(-(L - 1) / 30) (much slower growth: f=0 at level 1, f~0.28 at level 11, f~0.49 at level 21)
-// 2. Intra-level: rises gently from start to end; first 20% starts easier
+// Balanced progressive curve: fBase = 1 - exp(-(L - 1) / LEVEL_GROWTH_TAU)
+// Smoothly scales from Level 1 (f=0) through Level 10 (f~0.43) to Level 30 (f~0.84)
 function getLevelDifficulty(lvl, p = 0) {
   const L = lvl || curLevel;
-  const fBase = 1 - Math.exp(-(L - 1) / 30);
+  const fBase = 1 - Math.exp(-(L - 1) / LEVEL_GROWTH_TAU);
 
   let intra = 1.0;
   if (p < INTRA_LEVEL_EASY_FRACTION) {
@@ -1765,7 +1925,7 @@ function getLevelDifficulty(lvl, p = 0) {
   return { f, fBase, intra };
 }
 
-// Scroll speed multiplier = 1 + 0.25 * f
+// Scroll speed multiplier = 1 + 0.35 * f
 function scrollSpeed(difficultyDistance = getDifficultyDistance()) {
   const p = getLevelProgress();
   const { f } = getLevelDifficulty(curLevel, p);
@@ -1775,7 +1935,7 @@ function scrollSpeed(difficultyDistance = getDifficultyDistance()) {
 }
 const speed = scrollSpeed;
 
-// Gap height = lerp(4.4, 3.0, f) * carH (never below 3.0 * carH)
+// Gap height = lerp(GAP_LEVEL_1_RATIO, GAP_MAX_DIFFICULTY_RATIO, f) * carH
 function getGapHeight(lvl, p = 0) {
   const { f } = getLevelDifficulty(lvl, p);
   const gapRatio = lerp(GAP_LEVEL_1_RATIO, GAP_MAX_DIFFICULTY_RATIO, f);
@@ -1789,18 +1949,18 @@ function showToast(msg) {
 }
 
 // 3. SPIKE SIZES:
-// - levels 1 & 2: only small spikes
-// - levels 3 to 5: medium and small spikes
-// - level 6+: big spikes appear, reaching at most 20% of clusters at high levels
+// - levels 1 & 2: only small spikes (12px), friendly introduction
+// - levels 3 to 4: medium (22px) and small spikes
+// - level 5+: big spikes (36px) appear moderately (8% to 24% at high levels)
 function pickClusterSize(lvl, levelRng) {
   const L = lvl || curLevel;
-  if (L < 6) {
+  if (L < 5) {
     if (L <= 2) return 'small';
-    return levelRng() < 0.5 ? 'medium' : 'small';
+    return levelRng() < 0.45 ? 'medium' : 'small';
   }
-  const t = Math.max(0, Math.min(1, (L - 6) / (25 - 6)));
-  const pBig = 0.05 + (0.20 - 0.05) * t; // at most 20% even at high levels
-  const pMed = 0.35;
+  const t = Math.max(0, Math.min(1, (L - 5) / (25 - 5)));
+  const pBig = 0.08 + (0.24 - 0.08) * t;
+  const pMed = 0.42;
   const r = levelRng();
   if (r < pBig) return 'big';
   if (r < pBig + pMed) return 'medium';
@@ -1878,39 +2038,39 @@ function addSeg(isOpen = false, forceLen) {
   // 2. Base Gap Height = lerp(4.4, 3.0, f) * carH (never below 3.0 * carH)
   let gap = isOpen ? 380 : getGapHeight(curLevel, p);
 
-  // 3. Squeeze sections (gap about 2.9 * carH) only from level 10
+  // 3. Squeeze sections (gap about 2.85 * carH) from level 7
   let isSqueeze = false;
-  if (!isOpen && curLevel >= 10) {
-    if (curLevel >= 18) {
-      if (segIndex === 3 || segIndex === 4) isSqueeze = true;
+  if (!isOpen && curLevel >= 7) {
+    if (curLevel >= 15) {
+      if (segIndex === 4 || segIndex === 8) isSqueeze = true;
     } else {
-      if (segIndex === 3) isSqueeze = true;
+      if (segIndex === 4) isSqueeze = true;
     }
   }
   if (isSqueeze) {
-    gap = SQUEEZE_GAP_RATIO * CAR_HITBOX_H; // about 2.9 * carH
+    gap = SQUEEZE_GAP_RATIO * CAR_HITBOX_H;
     len = Math.max(BASE_SEGMENT_LEN, Math.round(len * 0.9));
   }
 
   // Seed twists for this level:
   if (!isOpen) {
-    if (levelSeedTwist === 'tight_corridor' && (segIndex === 1 || segIndex === 2)) {
+    if (levelSeedTwist === 'tight_corridor' && (segIndex === 2 || segIndex === 5)) {
       gap = Math.max(GAP_MAX_DIFFICULTY_RATIO * CAR_HITBOX_H, gap * 0.94);
     }
   }
 
-  // 4. Moving rails: only from level 14, small amplitude (at most 0.5 * carH = 20px)
+  // 4. Moving rails: from level 10, smooth gentle sine motion
   let moving = false;
   let moveAmp = 0;
   let moveSpeed = 0;
   let movePhase = 0;
 
-  if (!isOpen && curLevel >= 14) {
-    const isMovingSeg = (curLevel >= 22) ? (segIndex === 2 || segIndex === 4) : (segIndex === 2);
+  if (!isOpen && curLevel >= 10) {
+    const isMovingSeg = (curLevel >= 18) ? (segIndex === 3 || segIndex === 7) : (segIndex === 4);
     if (isMovingSeg) {
       moving = true;
       moveAmp = MOVE_RAIL_AMP_MIN + levelPRNG() * (MOVE_RAIL_AMP_MAX - MOVE_RAIL_AMP_MIN);
-      moveSpeed = 1.0;
+      moveSpeed = (curLevel >= 16) ? MOVE_RAIL_SPEED_FAST : MOVE_RAIL_SPEED_SLOW;
       movePhase = levelPRNG() * Math.PI * 2;
     }
   }
@@ -2093,6 +2253,20 @@ function startLevel(lvl) {
   stopTimer = 0;
   autoLanding = false;
   landingStartY = CAR_REST_Y;
+  safetyLanding = false;
+  safetyLandingTimer = 0;
+  hasTouchedDown = false;
+  finishRunStage = 'none';
+  finishRunTimer = 0;
+  landingScrollSpeed = 0;
+  scrollStopTimer = 0;
+  camEaseStart = 0;
+  camEaseDist = 0;
+  carDriveTimer = 0;
+  thumbsUpTimer = 0;
+  confettiStarted = false;
+  levelCompleted = false;
+  carDrawX = CAR_X;
   levelCompleteTimer = 0;
   levelJustCleared = 0;
   confettis = [];
@@ -2100,6 +2274,13 @@ function startLevel(lvl) {
   camSamples = [];
   realSpeedWPerSec = 0;
   realSpeedPxPerSec = 0;
+
+  TUNNEL_LENGTH = getTunnelLength(lvl);
+  TUNNEL_END_X = TUNNEL_START_X + TUNNEL_LENGTH;
+  FINISH_ROAD_X = TUNNEL_END_X + CALM_OPEN_GAP;
+  FINISH_ROAD_END = FINISH_ROAD_X + FINISH_ROAD_LENGTH;
+  LEVEL_LENGTH = FINISH_ROAD_X - CAR_X;
+  playLaunchSpinSound();
 
   const cfg = getLevelConfig(lvl);
   curConfig = cfg;
@@ -2204,6 +2385,240 @@ function die() {
   }
 }
 
+function spawnTireDust() {
+  const drawW = CAR_DRAW_W;
+  const drawH = CAR_DRAW_H;
+  const rearOx = -drawW / 2 + drawW * WHEEL_REAR_X;
+  const frontOx = -drawW / 2 + drawW * WHEEL_FRONT_X;
+  const wheelY = cy + drawH * (WHEEL_Y - 0.5) + (drawW * WHEEL_RADIUS) * 0.9;
+  for (const ox of [rearOx, frontOx]) {
+    parts.push({
+      x: carDrawX + ox + rnd(-3, 3),
+      y: wheelY + rnd(-1, 2),
+      vx: rnd(-45, -15),
+      vy: rnd(-5, 0),
+      l: 0,
+      m: rnd(0.2, 0.35),
+      size: rnd(2.5, 4.5),
+      color: 'rgba(255, 255, 255, 0.65)'
+    });
+  }
+}
+
+// Cheerful stylized cartoon character standing on the finish road
+function drawFinishCharacter(charX, roadTop) {
+  if (charX < -50 || charX > W + 50) return;
+  const footY = roadTop + 24; // Standing on asphalt surface
+  const isCarStopped = (finishRunStage === 'car_stopped' || st === 'level_complete');
+  let jumpY = 0;
+  if (isCarStopped) {
+    const jumpT = Math.min(1.0, thumbsUpTimer / 0.42);
+    jumpY = Math.sin(jumpT * Math.PI) * 11;
+  }
+  const baseY = footY - jumpY;
+
+  ctx.save();
+  // 1. Soft ground shadow on asphalt
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.32)';
+  ctx.beginPath();
+  const shadowScale = Math.max(0.5, 1 - jumpY * 0.04);
+  ctx.ellipse(charX, footY + 1, 12 * shadowScale, 3.8 * shadowScale, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 2. Dress shoes (shiny black with glossy white rim)
+  ctx.fillStyle = '#0f172a';
+  ctx.beginPath();
+  ctx.ellipse(charX - 5.5, baseY - 2, 5, 3, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(charX + 5.5, baseY - 2, 5, 3, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
+  ctx.fillRect(charX - 7, baseY - 4, 3, 1.5);
+  ctx.fillRect(charX + 4, baseY - 4, 3, 1.5);
+
+  // 3. Tailored black trousers
+  ctx.fillStyle = '#1e293b';
+  ctx.fillRect(charX - 8, baseY - 22, 5.5, 20);
+  ctx.fillRect(charX + 2.5, baseY - 22, 5.5, 20);
+  ctx.fillStyle = '#334155';
+  ctx.fillRect(charX - 5.5, baseY - 20, 1, 16);
+  ctx.fillRect(charX + 5, baseY - 20, 1, 16);
+
+  // 4. Black suit jacket body
+  ctx.fillStyle = '#0f172a';
+  ctx.fillRect(charX - 9.5, baseY - 42, 19, 21);
+  ctx.fillStyle = '#1e293b';
+  ctx.fillRect(charX - 8.5, baseY - 41, 17, 19);
+
+  // 5. White shirt & red tie
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.moveTo(charX - 4.5, baseY - 42);
+  ctx.lineTo(charX + 4.5, baseY - 42);
+  ctx.lineTo(charX, baseY - 30);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = '#dc2626';
+  ctx.beginPath();
+  ctx.moveTo(charX - 1.5, baseY - 40);
+  ctx.lineTo(charX + 1.5, baseY - 40);
+  ctx.lineTo(charX + 2, baseY - 31);
+  ctx.lineTo(charX, baseY - 28);
+  ctx.lineTo(charX - 2, baseY - 31);
+  ctx.closePath();
+  ctx.fill();
+
+  // 6. Suit lapels
+  ctx.fillStyle = '#0f172a';
+  ctx.beginPath();
+  ctx.moveTo(charX - 9, baseY - 42);
+  ctx.lineTo(charX - 4, baseY - 34);
+  ctx.lineTo(charX - 6, baseY - 34);
+  ctx.closePath();
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(charX + 9, baseY - 42);
+  ctx.lineTo(charX + 4, baseY - 34);
+  ctx.lineTo(charX + 6, baseY - 34);
+  ctx.closePath();
+  ctx.fill();
+
+  // 7. Left arm (at side / hip)
+  ctx.fillStyle = '#0f172a';
+  ctx.fillRect(charX - 12.5, baseY - 41, 3.5, 17);
+  ctx.fillStyle = '#fed7aa';
+  ctx.beginPath();
+  ctx.arc(charX - 10.5, baseY - 23, 2.8, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 8. Right arm (waving vs thumbs up)
+  ctx.fillStyle = '#0f172a';
+  if (!isCarStopped) {
+    // Waving while car comes near
+    const waveAngle = Math.sin(gameTime * 8) * 0.4;
+    ctx.save();
+    ctx.translate(charX + 9, baseY - 40);
+    ctx.rotate(waveAngle - 0.4);
+    ctx.fillRect(0, -16, 3.5, 17);
+    ctx.fillStyle = '#fed7aa';
+    ctx.beginPath();
+    ctx.arc(1.7, -18, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillRect(0.5, -23, 1.2, 5);
+    ctx.fillRect(2.2, -23, 1.2, 5);
+    ctx.fillRect(-1.0, -21, 1.2, 4);
+    ctx.restore();
+  } else {
+    // Clear thumbs-up when car has stopped
+    ctx.save();
+    ctx.translate(charX + 9, baseY - 38);
+    ctx.fillRect(0, -14, 3.8, 14);
+    ctx.fillStyle = '#fed7aa';
+    ctx.beginPath();
+    ctx.arc(2, -16, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    roundRect(ctx, 1, -25, 3.2, 10, 1.6);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // 9. Friendly stylized cartoon head
+  const headY = baseY - 49;
+  ctx.fillStyle = '#fed7aa';
+  ctx.fillRect(charX - 2.5, headY + 4, 5, 5);
+  ctx.beginPath();
+  ctx.ellipse(charX, headY, 7.5, 8.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Rosy cheeks
+  ctx.fillStyle = 'rgba(251, 113, 133, 0.45)';
+  ctx.beginPath();
+  ctx.arc(charX - 5, headY + 1.5, 2.2, 0, Math.PI * 2);
+  ctx.arc(charX + 5, headY + 1.5, 2.2, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Big friendly warm smile with white teeth
+  ctx.fillStyle = '#0f172a';
+  ctx.beginPath();
+  ctx.arc(charX, headY + 1.5, 4.2, 0.15, Math.PI - 0.15);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.rect(charX - 3, headY + 1.5, 6, 2);
+  ctx.fill();
+
+  // Cheerful eyes (^ ^ smiling arcs)
+  ctx.strokeStyle = '#0f172a';
+  ctx.lineWidth = 1.4;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.arc(charX - 3.5, headY - 1.5, 2.2, Math.PI + 0.3, Math.PI * 2 - 0.3);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(charX + 3.5, headY - 1.5, 2.2, Math.PI + 0.3, Math.PI * 2 - 0.3);
+  ctx.stroke();
+
+  // Short dark hair (glossy cartoon style)
+  ctx.fillStyle = '#0f172a';
+  ctx.beginPath();
+  ctx.arc(charX, headY - 2.5, 8.2, Math.PI * 0.9, Math.PI * 2.1);
+  ctx.lineTo(charX + 8, headY + 1);
+  ctx.lineTo(charX + 6, headY - 1);
+  ctx.lineTo(charX - 6, headY - 1);
+  ctx.lineTo(charX - 8, headY + 1);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#334155';
+  ctx.beginPath();
+  ctx.ellipse(charX - 1.5, headY - 8.5, 4.5, 1.8, -0.2, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 10. "YES!" speech bubble pops up above him for 1.5 seconds when car has stopped
+  if (isCarStopped && thumbsUpTimer <= 1.5) {
+    const bubbleProgress = Math.min(1.0, thumbsUpTimer / 0.15);
+    const bubbleScale = Math.sin(bubbleProgress * Math.PI * 0.5);
+    const bubbleX = charX;
+    const bubbleY = headY - 22;
+
+    ctx.save();
+    ctx.translate(bubbleX, bubbleY);
+    ctx.scale(bubbleScale, bubbleScale);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
+    ctx.beginPath();
+    roundRect(ctx, -23, -13, 46, 24, 7);
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.strokeStyle = '#0f172a';
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    roundRect(ctx, -23, -15, 46, 24, 7);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.moveTo(-4, 9);
+    ctx.lineTo(0, 16);
+    ctx.lineTo(5, 9);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(-3, 7, 7, 3);
+    ctx.font = '900 13px "Lilita One", "Baloo 2", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#16a34a';
+    ctx.fillText('YES!', 0, -3);
+    ctx.restore();
+  }
+
+  ctx.restore();
+}
+
 // 3-layer cartoon road platform with red deck edge and soft shadow
 function drawRoadPlatform(startX, endX, roadTop, isFinish = false) {
   const w = endX - startX;
@@ -2274,8 +2689,11 @@ function drawRoadPlatform(startX, endX, roadTop, isFinish = false) {
   if (isFinish) {
     ctx.save();
     const cfg = curConfig;
-    const finishLineWx = startX + (endX - startX) * FINISH_LINE_AT;
+    const camStop = endX - ROAD_END_STOP_X;
+    const finishLineWx = camStop + FINISH_LINE_X;
+    const characterWx = camStop + CHARACTER_X;
     const flX = finishLineWx - cam;
+    const charX = characterWx - cam;
 
     // 1. Checkered Finish Line Strip across the asphalt road
     if (flX > -40 && flX < W + 40) {
@@ -2299,7 +2717,7 @@ function drawRoadPlatform(startX, endX, roadTop, isFinish = false) {
       ctx.fillRect(flX + stripW / 2, roadTop, 1.5, bandH);
       ctx.restore();
 
-      // 2. Two Finish Flags placed at about 85% of the road length
+      // 2. Two Finish Flags placed on sides of the finish line
       for (const side of [-1, 1]) {
         const poleX = flX + side * 15;
         const poleBaseY = roadTop + 2;
@@ -2374,51 +2792,9 @@ function drawRoadPlatform(startX, endX, roadTop, isFinish = false) {
       ctx.fillRect(rx + 3, roadTop - 28, 7, 3);
     }
 
-    // 4. Small man in black suit cheering after the finish line
-    const manWx = finishLineWx + 30;
-    const manX = manWx - cam;
-    if (manX > -30 && manX < W + 30) {
-      const footY = roadTop + 24; // Standing on asphalt surface
-      // Shadow
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
-      ctx.beginPath();
-      ctx.ellipse(manX, footY + 1, 9, 3, 0, 0, 6.28);
-      ctx.fill();
-      // Legs (black trousers)
-      ctx.fillStyle = '#0f172a';
-      ctx.fillRect(manX - 5, footY - 14, 4, 14);
-      ctx.fillRect(manX + 1, footY - 14, 4, 14);
-      // Torso / Suit jacket (black)
-      ctx.fillStyle = '#1e293b';
-      ctx.fillRect(manX - 7, footY - 30, 14, 17);
-      // White shirt collar & red tie
-      ctx.fillStyle = '#ffffff';
-      ctx.beginPath();
-      ctx.moveTo(manX - 3, footY - 30);
-      ctx.lineTo(manX + 3, footY - 30);
-      ctx.lineTo(manX, footY - 22);
-      ctx.closePath();
-      ctx.fill();
-      ctx.fillStyle = '#dc2626';
-      ctx.fillRect(manX - 1, footY - 28, 2, 8);
-      // Arms cheering up
-      ctx.fillStyle = '#0f172a';
-      ctx.fillRect(manX - 9, footY - 36, 3, 16);
-      ctx.fillRect(manX + 6, footY - 36, 3, 16);
-      // Head
-      ctx.fillStyle = '#fbcfe8';
-      ctx.beginPath();
-      ctx.arc(manX, footY - 36, 5.5, 0, 6.28);
-      ctx.fill();
-      // Black hair
-      ctx.fillStyle = '#0f172a';
-      ctx.beginPath();
-      ctx.arc(manX, footY - 38, 5.5, 3.14, 6.28);
-      ctx.fill();
-      // Sunglasses
-      ctx.fillStyle = '#000000';
-      ctx.fillRect(manX - 4, footY - 37, 8, 2.5);
-    }
+    // 4. Cheering friendly character standing on the road at characterWx
+    drawFinishCharacter(charX, roadTop);
+
     ctx.restore();
   }
 }
@@ -2991,31 +3367,12 @@ function step(dt) {
     const wx = cam + CAR_X;
     const progress = getLevelProgress();
 
-    // Requirement 2: Auto Landing
-    // Take over car with smooth autopilot as soon as the last spike has passed the car (wx >= TUNNEL_END_X).
-    if (wx >= TUNNEL_END_X && !autoLanding) {
-      autoLanding = true;
-      landingStartY = cy;
-    }
-
-    if (autoLanding || stopping) {
+    if (finishRunStage !== 'none' || stopping) {
       hold = false;
       thrust = 0;
     }
 
-    if (autoLanding) {
-      if (wx < FINISH_ROAD_X) {
-        // Calm open area of CALM_OPEN_GAP (300px): ease in and out toward CAR_REST_Y
-        const landT = Math.max(0, Math.min(1.0, (wx - TUNNEL_END_X) / CALM_OPEN_GAP));
-        const easeT = landT * landT * (3 - 2 * landT);
-        cy = landingStartY + (CAR_REST_Y - landingStartY) * easeT;
-        vy = 0;
-      } else {
-        // Tires touch asphalt exactly when car is above the finish road
-        cy = CAR_REST_Y;
-        vy = 0;
-      }
-    } else if (!stopping) {
+    if (finishRunStage === 'none') {
       if (hold) {
         thrust = Math.min(1, thrust + dt / THRUST_RISE_TIME);
       } else {
@@ -3028,8 +3385,11 @@ function step(dt) {
       vy = Math.max(-MAX_UP_SPEED, Math.min(MAX_DOWN_SPEED, vy));
       cy += vy * dt;
 
+      // The finish road and start road work as a floor: when the car sinks onto it, the tires rest on the asphalt
       const onStartPlatform = (wx >= START_ROAD_START && wx <= START_ROAD_END);
-      if (onStartPlatform) {
+      const onFinishPlatform = (wx >= FINISH_ROAD_X && wx <= FINISH_ROAD_END);
+      const onRoadPlatform = onStartPlatform || onFinishPlatform;
+      if (onRoadPlatform) {
         if (!hold && cy >= CAR_REST_Y) {
           cy = CAR_REST_Y;
           vy = 0;
@@ -3040,113 +3400,222 @@ function step(dt) {
         }
       }
 
+      // Safety landing fallback: if the road has passed under the car's front and the car is still in the air, ease down gently
+      const carFrontWx = wx + CAR_DRAW_W * 0.5;
+      if (carFrontWx >= FINISH_ROAD_X && cy < CAR_REST_Y - 2 && !safetyLanding) {
+        safetyLanding = true;
+        safetyLandingStartY = cy;
+        safetyLandingTimer = 0;
+      }
+      if (safetyLanding) {
+        safetyLandingTimer += dt;
+        const t = Math.min(1.0, safetyLandingTimer / 0.6);
+        const easeT = t * t * (3 - 2 * t);
+        cy = safetyLandingStartY + (CAR_REST_Y - safetyLandingStartY) * easeT;
+        vy = 0;
+        if (t >= 1.0 || cy >= CAR_REST_Y) {
+          cy = CAR_REST_Y;
+          safetyLanding = false;
+        }
+      }
+
+      // Ceiling and floor boundaries
       if (cy < 16) { cy = 16; vy = 0; }
       if (cy > H - 16) { cy = H - 16; vy = 0; }
     }
 
-    // Requirement 4: Finish Line
-    // When the finish line reaches the car's x position, level is complete:
-    // Confetti starts, score shows 100, scroll speed eases down to 0 in STOP_TIME (1.2s).
-    // Car rolls to a smooth stop on the road after the line.
-    // One second after car has stopped (STOP_TIME + 1.0s = 2.2s), show "Level N Clear!" popup.
-    if (wx >= FINISH_LINE_X && !stopping && cy >= CAR_REST_Y - 2) {
-      stopping = true;
-      stopTimer = 0;
-      playWinSound();
-      initConfetti();
-    }
-
-    let ease = 1;
-    if (stopping) {
-      stopTimer += dt;
-      if (stopTimer <= STOP_TIME) {
-        ease = Math.max(0, 1 - stopTimer / STOP_TIME);
-      } else {
-        ease = 0;
-      }
-
-      cy = CAR_REST_Y;
-      vy = 0;
+    // Start finish run as soon as car lands on finish road for the first time
+    if (!hasTouchedDown && wx >= FINISH_ROAD_X && cy >= CAR_REST_Y - 2) {
+      hasTouchedDown = true;
+      finishRunStage = 'speed_run';
+      finishRunTimer = 0;
+      landingScrollSpeed = sp;
       hold = false;
       thrust = 0;
+      playWinSound();
 
-      if (stopTimer >= STOP_TIME + 1.0) {
-        st = 'level_complete';
-        stopping = false;
-        autoLanding = false;
-        hold = false;
-        vy = 0;
-        cy = CAR_REST_Y;
-        levelCompleteTimer = 0;
-        levelJustCleared = curLevel;
-        const nextLvl = curLevel + 1;
-        const clearScore = 100 * curLevel;
-        if (clearScore > best) best = clearScore;
-        saveProgress(curLevel, Math.max(highestLevel, nextLvl), best);
-      }
-    }
-
-    // Speed boost on complete road: car speeds up fast when touching down on finish road
-    let finishBoost = 1.0;
-    if (wx >= FINISH_ROAD_X || stopping) {
-      const distOnRoad = Math.max(0, wx - FINISH_ROAD_X);
-      const boostT = Math.min(1.0, distOnRoad / 100);
-      const easeT = boostT * boostT * (3 - 2 * boostT);
-      finishBoost = 1.0 + 0.95 * easeT;
-    }
-
-    const effectiveSp = sp * finishBoost * ease;
-    cam += effectiveSp * dt;
-
-    if (SHOW_DEBUG) {
-      updateRealSpeedMeasurement(performance.now() / 1000);
-    }
-
-    const onStartPlatform = (wx >= START_ROAD_START && wx <= START_ROAD_END);
-    const onFinishPlatform = (wx >= FINISH_ROAD_X && wx <= FINISH_ROAD_END);
-    const onRoadPlatform = onStartPlatform || onFinishPlatform;
-
-    // Wheel spin angular speed physics:
-    // Follows scroll speed; spins normal speed on road; slows down smoothly as car stops
-    const wheelRadiusPx = CAR_DRAW_W * WHEEL_RADIUS;
-    const targetSpinMult = (hold && !autoLanding && !stopping) ? 2.2 : 1.0;
-    if (thrustSpinMultiplier < targetSpinMult) {
-      thrustSpinMultiplier = Math.min(targetSpinMult, thrustSpinMultiplier + (1.2 / 0.08) * dt);
-    } else if (thrustSpinMultiplier > targetSpinMult) {
-      thrustSpinMultiplier = Math.max(targetSpinMult, thrustSpinMultiplier - (1.2 / 0.30) * dt);
-    }
-
-    if (wheelRadiusPx > 0 && effectiveSp > 0) {
-      currentAngularSpeed = (effectiveSp / wheelRadiusPx) * thrustSpinMultiplier;
-    } else {
-      currentAngularSpeed = 0;
-    }
-
-    wheelAngle += currentAngularSpeed * dt;
-    wheelRot = wheelAngle;
-
-    const isCarOnRoad = onRoadPlatform && (cy >= CAR_REST_Y - 2);
-    const isCarInAir = !isCarOnRoad;
-
-    // Requirement 2: No smoke during landing, driving on road, or stopping
-    if (hold && isCarInAir && st === 'play' && !autoLanding && !stopping) {
+      // Initial touchdown tire puff
       const drawW = CAR_DRAW_W;
       const drawH = CAR_DRAW_H;
-      const rearWheelOx = -drawW / 2 + drawW * 0.1843;
-      const frontWheelOx = -drawW / 2 + drawW * 0.8190;
-      const smokeY = cy + drawH / 2;
-
-      for (const ox of [rearWheelOx, frontWheelOx]) {
-        parts.push({
-          x: CAR_X + ox,
-          y: smokeY,
-          vx: rnd(-3, 3) - effectiveSp * 0.15,
-          vy: rnd(140, 230),
-          l: 0,
-          m: rnd(0.3, 0.45),
-          size: rnd(4, 7) * (CAR_SCALE * 0.6)
-        });
+      const rearOx = -drawW / 2 + drawW * WHEEL_REAR_X;
+      const frontOx = -drawW / 2 + drawW * WHEEL_FRONT_X;
+      const wheelY = -drawH / 2 + drawH * WHEEL_Y;
+      const wheelContactY = cy + wheelY + (drawW * WHEEL_RADIUS) * 0.9;
+      for (const ox of [rearOx, frontOx]) {
+        for (let k = 0; k < 6; k++) {
+          parts.push({
+            x: CAR_X + ox + rnd(-5, 5),
+            y: wheelContactY + rnd(-2, 3),
+            vx: rnd(-80, -25),
+            vy: rnd(-20, 5),
+            l: 0,
+            m: rnd(0.2, 0.4),
+            size: rnd(4, 8),
+            color: 'rgba(240, 244, 250, 0.8)'
+          });
+        }
       }
+    }
+
+    const camStop = FINISH_ROAD_END - ROAD_END_STOP_X;
+    const easeDist = FINISH_RUN_SPEED * 0.5 * 0.5; // distance during 0.5s deceleration = 0.30 * W
+    const wheelRadiusPx = CAR_DRAW_W * WHEEL_RADIUS;
+
+    if (finishRunStage !== 'none') {
+      hold = false;
+      thrust = 0;
+      cy = CAR_REST_Y;
+      vy = 0;
+
+      if (finishRunStage === 'speed_run') {
+        finishRunTimer += dt;
+        const accelT = Math.min(1.0, finishRunTimer / 0.5);
+        const currentScrollSp = lerp(landingScrollSpeed, FINISH_RUN_SPEED, accelT);
+        cam += currentScrollSp * dt;
+        carDrawX = CAR_X;
+
+        // Wheels spin at their fastest speed
+        if (wheelRadiusPx > 0) {
+          const maxSpin = (FINISH_RUN_SPEED / wheelRadiusPx) * 2.5;
+          wheelAngle += maxSpin * dt;
+          wheelRot = wheelAngle;
+        }
+
+        // Subtle white dust at the tires
+        if (Math.random() < 0.35) {
+          spawnTireDust();
+        }
+
+        // Check when road end is approaching ROAD_END_STOP_X to ease to full stop in 0.5s
+        if (cam >= camStop - easeDist) {
+          finishRunStage = 'scroll_stopping';
+          scrollStopTimer = 0;
+          camEaseStart = cam;
+          camEaseDist = Math.max(0, camStop - cam);
+        }
+      } else if (finishRunStage === 'scroll_stopping') {
+        scrollStopTimer += dt;
+        const t = Math.min(1.0, scrollStopTimer / 0.5);
+        const progressEase = 1 - Math.pow(1 - t, 2);
+        cam = camEaseStart + camEaseDist * progressEase;
+        carDrawX = CAR_X;
+        const currentScrollSp = FINISH_RUN_SPEED * (1 - t);
+        if (wheelRadiusPx > 0) {
+          const spinRate = (currentScrollSp / wheelRadiusPx) * 2.5;
+          wheelAngle += spinRate * dt;
+          wheelRot = wheelAngle;
+        }
+        if (Math.random() < 0.25) {
+          spawnTireDust();
+        }
+        if (t >= 1.0) {
+          cam = camStop;
+          finishRunStage = 'car_driving';
+          carDriveTimer = 0;
+        }
+      } else if (finishRunStage === 'car_driving') {
+        cam = camStop;
+        carDriveTimer += dt;
+        const driveDuration = 1.2;
+        const t = Math.min(1.0, carDriveTimer / driveDuration);
+        const easeDrive = 1 - Math.pow(1 - t, 2.5);
+        const targetCarX = CAR_STOP_FRONT_X - CAR_DRAW_W * 0.5;
+        carDrawX = CAR_X + (targetCarX - CAR_X) * easeDrive;
+
+        // Wheels spin as car drives and brakes smoothly
+        const currentCarSpeed = ((targetCarX - CAR_X) * 2.5 * Math.pow(1 - t, 1.5)) / driveDuration;
+        if (wheelRadiusPx > 0) {
+          const spinRate = (currentCarSpeed / wheelRadiusPx) * 2.0;
+          wheelAngle += spinRate * dt;
+          wheelRot = wheelAngle;
+        }
+
+        // Confetti starts when car crosses finish line
+        const carFrontScreen = carDrawX + CAR_DRAW_W * 0.5;
+        if (carFrontScreen >= FINISH_LINE_X && !confettiStarted) {
+          confettiStarted = true;
+          initConfetti();
+        }
+
+        if (t >= 1.0) {
+          carDrawX = targetCarX;
+          finishRunStage = 'car_stopped';
+          thumbsUpTimer = 0;
+        }
+      } else if (finishRunStage === 'car_stopped') {
+        cam = camStop;
+        const targetCarX = CAR_STOP_FRONT_X - CAR_DRAW_W * 0.5;
+        carDrawX = targetCarX;
+        thumbsUpTimer += dt;
+
+        // One second after thumbs-up starts, show "Level N Clear!" popup and save progress
+        if (thumbsUpTimer >= 1.0 && !levelCompleted) {
+          levelCompleted = true;
+          st = 'level_complete';
+          levelCompleteTimer = 0;
+          levelJustCleared = curLevel;
+          const nextLvl = curLevel + 1;
+          const clearScore = 100 * curLevel;
+          if (clearScore > best) best = clearScore;
+          saveProgress(curLevel, Math.max(highestLevel, nextLvl), best);
+        }
+      }
+    } else {
+      // Normal game scrolling before finish road touchdown
+      cam += sp * dt;
+
+      if (SHOW_DEBUG) {
+        updateRealSpeedMeasurement(performance.now() / 1000);
+      }
+
+      // Wheel spin angular speed physics
+      const targetSpinMult = hold ? 2.2 : 1.0;
+      if (thrustSpinMultiplier < targetSpinMult) {
+        thrustSpinMultiplier = Math.min(targetSpinMult, thrustSpinMultiplier + (1.2 / 0.08) * dt);
+      } else if (thrustSpinMultiplier > targetSpinMult) {
+        thrustSpinMultiplier = Math.max(targetSpinMult, thrustSpinMultiplier - (1.2 / 0.30) * dt);
+      }
+
+      if (wheelRadiusPx > 0 && sp > 0) {
+        currentAngularSpeed = (sp / wheelRadiusPx) * thrustSpinMultiplier;
+      } else {
+        currentAngularSpeed = 0;
+      }
+
+      wheelAngle += currentAngularSpeed * dt;
+      wheelRot = wheelAngle;
+      carDrawX = CAR_X;
+
+      const onStartPlatform = (wx >= START_ROAD_START && wx <= START_ROAD_END);
+      const onFinishPlatform = (wx >= FINISH_ROAD_X && wx <= FINISH_ROAD_END);
+      const onRoadPlatform = onStartPlatform || onFinishPlatform;
+      const isCarOnRoad = onRoadPlatform && (cy >= CAR_REST_Y - 2);
+      const isCarInAir = !isCarOnRoad;
+
+      // Wheel thruster smoke during normal flight (only when in air, not on road)
+      if (hold && isCarInAir && st === 'play') {
+        const drawW = CAR_DRAW_W;
+        const drawH = CAR_DRAW_H;
+        const rearWheelOx = -drawW / 2 + drawW * WHEEL_REAR_X;
+        const frontWheelOx = -drawW / 2 + drawW * WHEEL_FRONT_X;
+        const smokeY = cy + drawH / 2;
+
+        for (const ox of [rearWheelOx, frontWheelOx]) {
+          parts.push({
+            x: CAR_X + ox,
+            y: smokeY,
+            vx: rnd(-3, 3) - sp * 0.15,
+            vy: rnd(140, 230),
+            l: 0,
+            m: rnd(0.3, 0.45),
+            size: rnd(4, 7) * (CAR_SCALE * 0.6)
+          });
+        }
+      }
+    }
+
+    if (confettiStarted) {
+      updateConfetti(dt);
     }
 
     if (nextX < cam + W + 400) addSeg(true, 400);
@@ -3165,8 +3634,8 @@ function step(dt) {
     }
 
     for (const s of segs) {
-      // Requirement 6: Crash cannot happen after the last spike
-      if (stopping || autoLanding || wx >= TUNNEL_END_X) break;
+      // Crash cannot happen after the last spike or during finish run
+      if (finishRunStage !== 'none' || stopping || wx >= TUNNEL_END_X) break;
       const curTop = (s.curTop !== undefined) ? s.curTop : s.top;
       const curBot = (s.curBot !== undefined) ? s.curBot : s.bot;
       if (wx + HITBOX_HALF_W > s.x && wx - HITBOX_HALF_W < s.x + s.w && !s.isOpen) {
@@ -3710,14 +4179,14 @@ function drawGameContent() {
       ctx.rect(0, 0, W, ROAD_TOP - 2);
       ctx.clip();
       ctx.globalAlpha = 0.7 * k;
-      ctx.fillStyle = '#ffffff';
+      ctx.fillStyle = p.color || '#ffffff';
       ctx.beginPath();
       ctx.arc(p.x, p.y, r, 0, 6.28);
       ctx.fill();
       ctx.restore();
     } else {
       ctx.globalAlpha = 0.7 * k;
-      ctx.fillStyle = '#ffffff';
+      ctx.fillStyle = p.color || '#ffffff';
       ctx.beginPath();
       ctx.arc(p.x, p.y, r, 0, 6.28);
       ctx.fill();
@@ -3775,15 +4244,15 @@ function drawGameContent() {
     const menuAlpha = Math.min(1, menuFadeTimer / 0.3);
     ctx.save();
     ctx.globalAlpha = menuAlpha;
-    car(CAR_X);
+    car(carDrawX);
     ctx.restore();
   } else {
-    car(CAR_X);
+    car(carDrawX);
   }
 
   // 7. UI and Screens (all HUD text in white with dark outline)
   if (st === 'play') {
-    if (stopping) {
+    if (stopping || confettiStarted) {
       drawConfetti();
     }
     drawHUD();
@@ -3799,8 +4268,8 @@ function drawGameContent() {
 
     ctx.save();
     ctx.globalAlpha = cardAlpha;
-    const cardText = getLevelDisplayText(curLevel, cfg);
-    const ribbonW = hasRealScenePicture(curLevel, cfg) ? 270 : 210;
+    const cardText = getLevelTitleCardText(curLevel);
+    const ribbonW = 270;
     drawRibbonHeader(W / 2, 210 + topInset * 0.5, ribbonW, 48, cardText, BUTTON_THEMES.blue, 2);
     ctx.restore();
 
@@ -3821,8 +4290,8 @@ function drawGameContent() {
 
     // Title Logo
     drawGlossyText('THORN RUSH', W / 2, 120 + topInset * 0.6, 46, 'center', '#ffffff', '#0f172a', 8);
-    const menuLevelText = getLevelDisplayText(curLevel, cfg);
-    drawGlossyText(menuLevelText, W / 2, 165 + topInset * 0.6, 18, 'center', '#ffffff', '#0f172a', 4.5);
+    const menuStageText = getStageMenuText(curLevel);
+    drawGlossyText(menuStageText, W / 2, 165 + topInset * 0.6, 18, 'center', '#ffffff', '#0f172a', 4.5);
 
     // Bottom Row: moved up by botInset
     const btnY = H - 70 - botInset;
@@ -4059,7 +4528,7 @@ function handlePointerDown(e) {
   }
 
   if (st === 'play') {
-    if (!autoLanding && !stopping) {
+    if (!stopping && finishRunStage === 'none') {
       hold = true;
     }
   }
@@ -4154,7 +4623,7 @@ window.addEventListener('keydown', e => {
     if (!e.repeat) {
       if (st === 'ready') { startLevel(curLevel); st = 'play'; hold = true; }
       else if (st === 'play') {
-        if (!autoLanding && !stopping) {
+        if (!stopping && finishRunStage === 'none') {
           hold = true;
         }
       }
