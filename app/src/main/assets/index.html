@@ -66,7 +66,7 @@ const STAGES = [
     particleType: 'dust',
     spikeStyle: 'steel cone studs',
     railColor: '#5a4a3a',
-    backgroundPicture: 'image_e46b893e.png'
+    backgroundPicture: 'image_d3dfd714.png'
   },
   {
     name: 'Neon City',
@@ -78,7 +78,7 @@ const STAGES = [
     particleType: 'rain',
     spikeStyle: 'glowing blade spikes',
     railColor: '#1a2a44',
-    backgroundPicture: 'image_e46b893e.png'
+    backgroundPicture: 'image_d3dfd714.png'
   },
   {
     name: 'Frozen Peaks',
@@ -89,7 +89,7 @@ const STAGES = [
     particleType: 'snow',
     spikeStyle: 'ice crystal spikes',
     railColor: '#4a6a8a',
-    backgroundPicture: 'image_e46b893e.png'
+    backgroundPicture: 'image_d3dfd714.png'
   },
   {
     name: 'Volcano Wasteland',
@@ -100,7 +100,7 @@ const STAGES = [
     particleType: 'embers',
     spikeStyle: 'black rock spikes with glowing tips',
     railColor: '#2a1a1a',
-    backgroundPicture: 'image_e46b893e.png'
+    backgroundPicture: 'image_d3dfd714.png'
   },
   {
     name: 'Cyber Factory',
@@ -111,7 +111,7 @@ const STAGES = [
     particleType: 'sparks',
     spikeStyle: 'yellow saw-tooth and fork spikes',
     railColor: '#3a4a5a',
-    backgroundPicture: 'image_e46b893e.png'
+    backgroundPicture: 'image_d3dfd714.png'
   },
   {
     name: 'Alien Jungle',
@@ -122,7 +122,7 @@ const STAGES = [
     particleType: 'glowing spores',
     spikeStyle: 'thorn and claw spikes',
     railColor: '#2a1a4a',
-    backgroundPicture: 'image_e46b893e.png'
+    backgroundPicture: 'image_d3dfd714.png'
   },
   {
     name: 'Deep Ocean Ruins',
@@ -133,7 +133,7 @@ const STAGES = [
     particleType: 'bubbles',
     spikeStyle: 'coral spikes',
     railColor: '#0f3a44',
-    backgroundPicture: 'image_e46b893e.png'
+    backgroundPicture: 'image_d3dfd714.png'
   },
   {
     name: 'Space Station',
@@ -144,7 +144,7 @@ const STAGES = [
     particleType: 'floating dust',
     spikeStyle: 'energy crystal spikes',
     railColor: '#1a1f3a',
-    backgroundPicture: 'image_e46b893e.png'
+    backgroundPicture: 'image_d3dfd714.png'
   }
 ];
 
@@ -204,14 +204,15 @@ const PICKUP_RADIUS = 0.95 * 48;                // 45.6 px (generous from car ce
 let bronzeCoinsPicked = 0;
 
 // ==========================================
-// BOOSTER TUNING CONSTANTS (Requirement 1)
+// BOOSTER TUNING CONSTANTS (Requirement 1 & 2)
 // ==========================================
+const BOOSTER_TEST_START = true;
 const BOOST_DURATION = 3.5;       // (seconds)
-const BOOST_SPEED = 2.4;
+const BOOST_SPEED = 1.6;          // 1.6x world scroll speed
 const BOOST_INVINCIBLE = true;
-const BOOST_PER_LEVEL = 2;        // (never more than 3)
-const BOOSTER_RADIUS = 0.55 * 42; // ~23.1px (0.55 * carVis)
-const BOOSTER_PICKUP_RADIUS = 0.95 * 48; // generous pickup radius
+const BOOST_PER_LEVEL = 2;        // At most 2 boosters placed per stage
+const BOOSTER_RADIUS = 0.55 * 42; // radius 0.55 * carVis (~23.1px)
+const BOOSTER_PICKUP_RADIUS = 0.95 * 42; // pickup radius 0.95 * carVis (~39.9px, from car's center)
 
 let boostTimer = 0;
 let boostMaxDuration = BOOST_DURATION;
@@ -320,7 +321,7 @@ const VERTICAL_RESPONSE = 1.0;
 const SHOW_DEBUG = false;
 
 // Physics Response: balanced and gentle descent (not plummeting fast)
-const THRUST_RISE_TIME = 0.09;
+const THRUST_RISE_TIME = 0.08;
 const THRUST_FALL_TIME = 0.28;
 const AIR_DRAG = 1.25;
 
@@ -540,23 +541,18 @@ function mulberry32(a) {
 // LEVEL BACKGROUND & CAR PRELOADER
 // ==========================================
 const LEVEL_PICTURE_URLS = [
-  'image_e46b893e.png',
-  'image_39e1ec82.png',
-  'image_c5900dd7.png',
-  'image_dc734168.png',
-  'image_0e358c67.png',
-  'image_5d751a23.png',
-  'image_09b0a51e.png',
-  'bg1.png'
+  'image_d3dfd714.png'
 ];
-const CAR_IMAGE_URL = 'image_3abb7d58.png';
+const CAR_IMAGE_URL = 'car_white.png';
 const COIN_10_IMAGE_URL = 'coin_10.png';
 const COIN_50_IMAGE_URL = 'coin_50.png';
 const COIN_100_IMAGE_URL = 'coin_100.png';
+const BOOSTER_IMAGE_URL = 'booster.png';
 
 let coin10LoadedImg = null;
 let coin50LoadedImg = null;
 let coin100LoadedImg = null;
+let boosterLoadedImg = null;
 
 let carImgLoaded = false;
 let carImgFailed = false;
@@ -593,7 +589,7 @@ for (let i = 0; i < MAX_SPARKS; i++) {
 
 const preloadedPictures = [];
 let finishedAssetsCount = 0;
-const totalAssets = LEVEL_PICTURE_URLS.length + 1 + 3; // backgrounds + car + 3 coin types
+const totalAssets = LEVEL_PICTURE_URLS.length + 1 + 3 + 1; // backgrounds + car + 3 coin types + booster
 let assetsFinished = false;
 let loadingErrorMsg = null;
 let finishFillTimer = 0;
@@ -1729,6 +1725,19 @@ function initAssetPreloading() {
         });
     });
 
+    // 4. Preload Booster Icon Image
+    loadImageWithTimeout(BOOSTER_IMAGE_URL)
+      .then(img => {
+        boosterLoadedImg = img;
+        prerenderBoosterSprite(img);
+      })
+      .catch(err => {
+        console.warn('Booster image load failed:', err);
+      })
+      .finally(() => {
+        markAssetFinished();
+      });
+
   } catch (err) {
     console.error('initAssetPreloading error:', err);
     loadingErrorMsg = 'Preload: ' + (err.message || String(err));
@@ -2430,39 +2439,33 @@ function generateLevelConfig(level, prev) {
     };
   }
 
-  // Base stage theme
+  // Base stage theme & Colors (Requirement 3: silver for stage 1, glossy green for stage 2, glossy red for stage 3, hue shifts of stage color for others)
   const themeIdx = (stageNum - 1) % STAGE_STUD_THEMES.length;
   const baseTheme = STAGE_STUD_THEMES[themeIdx];
-
-  // Shift stage hue by -25 to +25 degrees from level seed
-  const hueShift = Math.round(rng() * 50 - 25);
-  const shiftedMain = shiftHue(baseTheme.mainColor, hueShift);
-  const shiftedAccent = shiftHue(baseTheme.accentColor, hueShift);
-  const shiftedGlow = shiftHue(baseTheme.glowColor, hueShift);
-  const shiftedRail = shiftHue(baseTheme.railColor, Math.round(hueShift * 0.35));
-
-  // Available families for this stage
-  let stageFamilies = baseTheme.families.slice();
-  if (stageNum > 8) {
-    // Stage 9+: pick 3 families from stage seed
-    const allFamilies = Object.keys(STUD_RATIOS);
-    const stageRng = mulberry32(hashInt(stageNum * 911 + 43));
-    const shuffled = allFamilies.slice().sort(() => stageRng() - 0.5);
-    stageFamilies = shuffled.slice(0, 3);
+  let shiftedMain, shiftedAccent, shiftedGlow;
+  if (stageNum === 1) {
+    shiftedMain = '#d1d5db'; // Steel silver
+    shiftedAccent = '#f8fafc';
+    shiftedGlow = '#94a3b8';
+  } else if (stageNum === 2) {
+    shiftedMain = '#22c55e'; // Glossy green
+    shiftedAccent = '#86efac';
+    shiftedGlow = '#4ade80';
+  } else if (stageNum === 3) {
+    shiftedMain = '#ef4444'; // Glossy red
+    shiftedAccent = '#fca5a5';
+    shiftedGlow = '#f87171';
+  } else {
+    const hueShift = Math.round(rng() * 40 - 20);
+    shiftedMain = shiftHue(baseTheme.mainColor, hueShift);
+    shiftedAccent = shiftHue(baseTheme.accentColor, hueShift);
+    shiftedGlow = shiftHue(baseTheme.glowColor, hueShift);
   }
-
-  // Pick 2 or 3 of stage's families for this level
-  const numPick = (rng() < 0.5 || stageFamilies.length <= 2) ? 2 : 3;
-  const shuffledFamilies = stageFamilies.slice().sort(() => rng() - 0.5);
-  const levelFamilies = shuffledFamilies.slice(0, Math.min(numPick, stageFamilies.length));
-
-  // Rail rivet style: round rivets, hex bolts, or small gears
-  const rivetStyles = ['round', 'hex', 'gear'];
-  const rivetStyle = rivetStyles[Math.floor(rng() * rivetStyles.length)];
-
-  // In ~1 level in 4: two-color pattern alternating in groups of 3 to 6
-  const isTwoColor = (level % 4 === 0 || rng() < 0.25);
-  const groupSize = Math.floor(3 + rng() * 4); // 3 to 6
+  const shiftedRail = '#1e2530'; // Dark gunmetal beam
+  const levelFamilies = ['classic'];
+  const rivetStyle = 'round'; // Round silver rivets
+  const isTwoColor = false;
+  const groupSize = 4;
 
   const color0 = {
     main: shiftedMain,
@@ -2562,32 +2565,31 @@ function hexToRgba(hex, alpha = 1) {
 }
 
 function renderStageStud(canvas, isTop, h, family, col) {
-  const sCtx = canvas.getContext('2d');
+  const sCtx = canvas.getContext("2d");
   sCtx.clearRect(0, 0, canvas.width, canvas.height);
 
   const cx = 27;
   const dir = isTop ? 1 : -1;
   const baseY = isTop ? 6 : 58;
   const tipY = baseY + dir * h;
-  const ratio = STUD_RATIOS[family] || 2.4;
-  const w = Math.max(6, Math.round(h / ratio));
+
+  // Width = height / 2.4 (Requirement 1)
+  const w = Math.max(6, Math.round(h / 2.4));
   const halfW = w / 2;
 
-  // 1. THE BASE COLLAR (about 22 percent of spike height, slightly wider than cone, thin darker ring line at top)
+  // 1. Short cylindrical collar at the base (about 22% of height, a little wider than cone, thin darker ring line at top)
   const collarH = Math.max(2, Math.round(h * 0.22));
   const collarW = Math.max(w + 2, Math.round(w * 1.15));
   const coneBaseY = baseY + dir * collarH;
-  const coneH = h - collarH;
 
-  const mainColor = (col && col.main) ? col.main : '#d1d5db';
-  const lightColor = (col && col.light) ? col.light : adjustColor(mainColor, 0.40);
+  const mainColor = (col && col.main) ? col.main : "#d1d5db";
+  const lightColor = (col && col.light) ? col.light : adjustColor(mainColor, 0.45);
   const darkColor = (col && col.dark) ? col.dark : adjustColor(mainColor, -0.45);
-  const accentColor = (col && col.accent) ? col.accent : '#ff8a1f';
-  const outlineColor = '#0a0d14';
+  const outlineColor = "#0a0d14";
 
   sCtx.save();
 
-  // Draw Base Collar (cylindrical collar with 3D gradient)
+  // Cylindrical Base Collar with 3D gradient
   const collarTop = isTop ? baseY : (baseY - collarH);
   const cGrad = sCtx.createLinearGradient(cx - collarW / 2, 0, cx + collarW / 2, 0);
   cGrad.addColorStop(0.0, lightColor);
@@ -2597,7 +2599,7 @@ function renderStageStud(canvas, isTop, h, family, col) {
   sCtx.fillStyle = cGrad;
   sCtx.fillRect(cx - collarW / 2, collarTop, collarW, collarH);
 
-  // Darker ring line at top of collar where cone meets collar
+  // Thin darker ring line at top of collar where cone meets collar
   sCtx.strokeStyle = adjustColor(darkColor, -0.5);
   sCtx.lineWidth = 1;
   sCtx.beginPath();
@@ -2610,442 +2612,51 @@ function renderStageStud(canvas, isTop, h, family, col) {
   sCtx.lineWidth = 0.8;
   sCtx.strokeRect(cx - collarW / 2, collarTop, collarW, collarH);
 
-  // 2. CONE BODY BY FAMILY
-  if (family === 'needle') {
-    // NEEDLE (ratio 3.6 to 1, thin razor sharp)
-    const gL = sCtx.createLinearGradient(cx - halfW, 0, cx, 0);
-    gL.addColorStop(0, lightColor);
-    gL.addColorStop(1, mainColor);
-    sCtx.fillStyle = gL;
-    sCtx.beginPath();
-    sCtx.moveTo(cx - halfW, coneBaseY);
-    sCtx.lineTo(cx, tipY);
-    sCtx.lineTo(cx, coneBaseY);
-    sCtx.closePath();
-    sCtx.fill();
+  // 2. Smooth cone with sharp but slightly rounded tip
+  const tipR = Math.max(0.6, w * 0.05);
 
-    const gR = sCtx.createLinearGradient(cx, 0, cx + halfW, 0);
-    gR.addColorStop(0, mainColor);
-    gR.addColorStop(1, darkColor);
-    sCtx.fillStyle = gR;
-    sCtx.beginPath();
-    sCtx.moveTo(cx, coneBaseY);
-    sCtx.lineTo(cx, tipY);
-    sCtx.lineTo(cx + halfW, coneBaseY);
-    sCtx.closePath();
-    sCtx.fill();
+  // 3D cone body gradient:
+  // bright white highlight on left (18% of width), main color in middle, darker shade on right (35% of width)
+  const coneGrad = sCtx.createLinearGradient(cx - halfW, 0, cx + halfW, 0);
+  coneGrad.addColorStop(0.0, lightColor);
+  coneGrad.addColorStop(0.18, "#ffffff"); // bright white highlight stripe on left (~18% of width)
+  coneGrad.addColorStop(0.35, lightColor);
+  coneGrad.addColorStop(0.55, mainColor); // main color in middle
+  coneGrad.addColorStop(0.65, darkColor); // darker shade on right (~35% of width)
+  coneGrad.addColorStop(1.0, adjustColor(darkColor, -0.30));
 
-    // Fine highlight stripe
-    sCtx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
-    sCtx.lineWidth = 1;
-    sCtx.beginPath();
-    sCtx.moveTo(cx - halfW * 0.45, coneBaseY);
-    sCtx.lineTo(cx - 0.5, tipY - dir * 1.5);
-    sCtx.stroke();
+  sCtx.fillStyle = coneGrad;
+  sCtx.beginPath();
+  sCtx.moveTo(cx - halfW, coneBaseY);
+  sCtx.lineTo(cx - tipR, tipY - dir * tipR);
+  sCtx.quadraticCurveTo(cx, tipY, cx + tipR, tipY - dir * tipR);
+  sCtx.lineTo(cx + halfW, coneBaseY);
+  sCtx.closePath();
+  sCtx.fill();
 
-    // Outline
-    sCtx.strokeStyle = outlineColor;
-    sCtx.lineWidth = 1;
-    sCtx.beginPath();
-    sCtx.moveTo(cx - halfW, coneBaseY);
-    sCtx.lineTo(cx, tipY);
-    sCtx.lineTo(cx + halfW, coneBaseY);
-    sCtx.stroke();
+  // Distinct bright white highlight stripe on the left (about 18% of width)
+  sCtx.strokeStyle = "rgba(255, 255, 255, 0.95)";
+  sCtx.lineWidth = Math.max(1.1, w * 0.18);
+  sCtx.beginPath();
+  sCtx.moveTo(cx - halfW * 0.45, coneBaseY);
+  sCtx.lineTo(cx - 0.7, tipY - dir * 1.8);
+  sCtx.stroke();
 
-    // Specular dot
-    sCtx.fillStyle = '#ffffff';
-    sCtx.beginPath();
-    sCtx.arc(cx, tipY - dir * 1, 1, 0, Math.PI * 2);
-    sCtx.fill();
+  // Thin dark outline
+  sCtx.strokeStyle = outlineColor;
+  sCtx.lineWidth = 0.9;
+  sCtx.beginPath();
+  sCtx.moveTo(cx - halfW, coneBaseY);
+  sCtx.lineTo(cx - tipR, tipY - dir * tipR);
+  sCtx.quadraticCurveTo(cx, tipY, cx + tipR, tipY - dir * tipR);
+  sCtx.lineTo(cx + halfW, coneBaseY);
+  sCtx.stroke();
 
-  } else if (family === 'fat') {
-    // FAT STUD (ratio 1.6 to 1, wide and blunt)
-    const tipW = Math.max(2.5, w * 0.22);
-    const gBody = sCtx.createLinearGradient(cx - halfW, 0, cx + halfW, 0);
-    gBody.addColorStop(0.0, lightColor);
-    gBody.addColorStop(0.18, '#ffffff');
-    gBody.addColorStop(0.40, mainColor);
-    gBody.addColorStop(0.70, darkColor);
-    gBody.addColorStop(1.0, adjustColor(darkColor, -0.2));
-    sCtx.fillStyle = gBody;
-
-    sCtx.beginPath();
-    sCtx.moveTo(cx - halfW, coneBaseY);
-    sCtx.lineTo(cx - tipW / 2, tipY);
-    sCtx.lineTo(cx + tipW / 2, tipY);
-    sCtx.lineTo(cx + halfW, coneBaseY);
-    sCtx.closePath();
-    sCtx.fill();
-
-    // Broad highlight stripe
-    sCtx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
-    sCtx.lineWidth = Math.max(1.5, w * 0.18);
-    sCtx.beginPath();
-    sCtx.moveTo(cx - halfW * 0.5, coneBaseY);
-    sCtx.lineTo(cx - tipW * 0.4, tipY - dir * 1.5);
-    sCtx.stroke();
-
-    // Outline
-    sCtx.strokeStyle = outlineColor;
-    sCtx.lineWidth = 1;
-    sCtx.beginPath();
-    sCtx.moveTo(cx - halfW, coneBaseY);
-    sCtx.lineTo(cx - tipW / 2, tipY);
-    sCtx.lineTo(cx + tipW / 2, tipY);
-    sCtx.lineTo(cx + halfW, coneBaseY);
-    sCtx.stroke();
-
-    // Blunt cap specular
-    sCtx.fillStyle = '#ffffff';
-    sCtx.fillRect(cx - tipW * 0.3, tipY - dir * 0.8, tipW * 0.6, 1);
-
-  } else if (family === 'double_cone') {
-    // DOUBLE CONE (ratio 2.2 to 1, two stacked cones with a ring between)
-    const midY = coneBaseY + dir * (coneH * 0.50);
-    const midW = halfW * 0.58;
-
-    // Lower cone
-    const gL1 = sCtx.createLinearGradient(cx - halfW, 0, cx + halfW, 0);
-    gL1.addColorStop(0.0, lightColor);
-    gL1.addColorStop(0.4, mainColor);
-    gL1.addColorStop(0.8, darkColor);
-    sCtx.fillStyle = gL1;
-    sCtx.beginPath();
-    sCtx.moveTo(cx - halfW, coneBaseY);
-    sCtx.lineTo(cx - midW, midY);
-    sCtx.lineTo(cx + midW, midY);
-    sCtx.lineTo(cx + halfW, coneBaseY);
-    sCtx.closePath();
-    sCtx.fill();
-
-    // Divider ring
-    const ringH = Math.max(1.5, Math.round(coneH * 0.08));
-    sCtx.fillStyle = '#cbd5e1';
-    sCtx.fillRect(cx - midW - 1, midY - dir * (ringH / 2), (midW + 1) * 2, ringH);
-    sCtx.strokeStyle = outlineColor;
-    sCtx.strokeRect(cx - midW - 1, midY - dir * (ringH / 2), (midW + 1) * 2, ringH);
-
-    // Upper cone
-    const gL2 = sCtx.createLinearGradient(cx - midW, 0, cx + midW, 0);
-    gL2.addColorStop(0.0, lightColor);
-    gL2.addColorStop(0.4, mainColor);
-    gL2.addColorStop(0.8, darkColor);
-    sCtx.fillStyle = gL2;
-    sCtx.beginPath();
-    sCtx.moveTo(cx - midW, midY);
-    sCtx.lineTo(cx, tipY);
-    sCtx.lineTo(cx + midW, midY);
-    sCtx.closePath();
-    sCtx.fill();
-
-    // Outlines & highlights
-    sCtx.strokeStyle = outlineColor;
-    sCtx.lineWidth = 1;
-    sCtx.beginPath();
-    sCtx.moveTo(cx - halfW, coneBaseY);
-    sCtx.lineTo(cx - midW, midY);
-    sCtx.lineTo(cx, tipY);
-    sCtx.lineTo(cx + midW, midY);
-    sCtx.lineTo(cx + halfW, coneBaseY);
-    sCtx.stroke();
-
-    sCtx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
-    sCtx.lineWidth = 1.2;
-    sCtx.beginPath();
-    sCtx.moveTo(cx - halfW * 0.5, coneBaseY);
-    sCtx.lineTo(cx - 0.6, tipY - dir * 1.5);
-    sCtx.stroke();
-
-    sCtx.fillStyle = '#ffffff';
-    sCtx.beginPath();
-    sCtx.arc(cx, tipY - dir * 1.2, 1.1, 0, Math.PI * 2);
-    sCtx.fill();
-
-  } else if (family === 'crystal') {
-    // FACETED CRYSTAL (ratio 2.3 to 1, 4 visible facets with distinct brightness)
-    const f1 = adjustColor(lightColor, 0.40);
-    const f2 = lightColor;
-    const f3 = mainColor;
-    const f4 = darkColor;
-
-    // Facet 1 (far left)
-    sCtx.fillStyle = f1;
-    sCtx.beginPath();
-    sCtx.moveTo(cx - halfW, coneBaseY);
-    sCtx.lineTo(cx - halfW * 0.35, coneBaseY);
-    sCtx.lineTo(cx, tipY);
-    sCtx.closePath();
-    sCtx.fill();
-
-    // Facet 2 (mid left)
-    sCtx.fillStyle = f2;
-    sCtx.beginPath();
-    sCtx.moveTo(cx - halfW * 0.35, coneBaseY);
-    sCtx.lineTo(cx, coneBaseY);
-    sCtx.lineTo(cx, tipY);
-    sCtx.closePath();
-    sCtx.fill();
-
-    // Facet 3 (mid right)
-    sCtx.fillStyle = f3;
-    sCtx.beginPath();
-    sCtx.moveTo(cx, coneBaseY);
-    sCtx.lineTo(cx + halfW * 0.45, coneBaseY);
-    sCtx.lineTo(cx, tipY);
-    sCtx.closePath();
-    sCtx.fill();
-
-    // Facet 4 (far right)
-    sCtx.fillStyle = f4;
-    sCtx.beginPath();
-    sCtx.moveTo(cx + halfW * 0.45, coneBaseY);
-    sCtx.lineTo(cx + halfW, coneBaseY);
-    sCtx.lineTo(cx, tipY);
-    sCtx.closePath();
-    sCtx.fill();
-
-    // Facet edge lines
-    sCtx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
-    sCtx.lineWidth = 0.8;
-    sCtx.beginPath();
-    sCtx.moveTo(cx - halfW * 0.35, coneBaseY);
-    sCtx.lineTo(cx, tipY);
-    sCtx.moveTo(cx, coneBaseY);
-    sCtx.lineTo(cx, tipY);
-    sCtx.stroke();
-
-    // Outline
-    sCtx.strokeStyle = outlineColor;
-    sCtx.lineWidth = 1;
-    sCtx.beginPath();
-    sCtx.moveTo(cx - halfW, coneBaseY);
-    sCtx.lineTo(cx, tipY);
-    sCtx.lineTo(cx + halfW, coneBaseY);
-    sCtx.stroke();
-
-    // Specular dot
-    sCtx.fillStyle = '#ffffff';
-    sCtx.beginPath();
-    sCtx.arc(cx, tipY - dir * 1.2, 1.2, 0, Math.PI * 2);
-    sCtx.fill();
-
-  } else if (family === 'curved_thorn') {
-    // CURVED THORN (ratio 2.5 to 1, tip bends to one side by 25 percent width)
-    const bend = w * 0.25;
-    const tipX = cx + bend;
-
-    const gThorn = sCtx.createLinearGradient(cx - halfW, 0, cx + halfW + bend, 0);
-    gThorn.addColorStop(0.0, lightColor);
-    gThorn.addColorStop(0.25, '#ffffff');
-    gThorn.addColorStop(0.50, mainColor);
-    gThorn.addColorStop(0.85, darkColor);
-    sCtx.fillStyle = gThorn;
-
-    sCtx.beginPath();
-    sCtx.moveTo(cx - halfW, coneBaseY);
-    sCtx.quadraticCurveTo(cx - halfW * 0.2 + bend * 0.4, coneBaseY + dir * coneH * 0.6, tipX, tipY);
-    sCtx.quadraticCurveTo(cx + halfW * 0.3 + bend * 0.4, coneBaseY + dir * coneH * 0.6, cx + halfW, coneBaseY);
-    sCtx.closePath();
-    sCtx.fill();
-
-    // Curved highlight
-    sCtx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
-    sCtx.lineWidth = 1.2;
-    sCtx.beginPath();
-    sCtx.moveTo(cx - halfW * 0.4, coneBaseY);
-    sCtx.quadraticCurveTo(cx - halfW * 0.1 + bend * 0.4, coneBaseY + dir * coneH * 0.6, tipX - 0.5, tipY - dir * 1.5);
-    sCtx.stroke();
-
-    // Outline
-    sCtx.strokeStyle = outlineColor;
-    sCtx.lineWidth = 1;
-    sCtx.beginPath();
-    sCtx.moveTo(cx - halfW, coneBaseY);
-    sCtx.quadraticCurveTo(cx - halfW * 0.2 + bend * 0.4, coneBaseY + dir * coneH * 0.6, tipX, tipY);
-    sCtx.quadraticCurveTo(cx + halfW * 0.3 + bend * 0.4, coneBaseY + dir * coneH * 0.6, cx + halfW, coneBaseY);
-    sCtx.stroke();
-
-    sCtx.fillStyle = '#ffffff';
-    sCtx.beginPath();
-    sCtx.arc(tipX, tipY - dir * 1, 1.1, 0, Math.PI * 2);
-    sCtx.fill();
-
-  } else if (family === 'mace') {
-    // MACE STUD (ratio 2.2 to 1, cone ending in a small ball)
-    const ballR = Math.max(2.4, w * 0.26);
-    const ballY = tipY - dir * ballR;
-
-    // Cone stem
-    const gStem = sCtx.createLinearGradient(cx - halfW, 0, cx + halfW, 0);
-    gStem.addColorStop(0.0, lightColor);
-    gStem.addColorStop(0.45, mainColor);
-    gStem.addColorStop(0.85, darkColor);
-    sCtx.fillStyle = gStem;
-
-    sCtx.beginPath();
-    sCtx.moveTo(cx - halfW, coneBaseY);
-    sCtx.lineTo(cx - ballR * 0.7, ballY);
-    sCtx.lineTo(cx + ballR * 0.7, ballY);
-    sCtx.lineTo(cx + halfW, coneBaseY);
-    sCtx.closePath();
-    sCtx.fill();
-
-    // Mace Ball with 3D radial sphere gradient
-    const bGrad = sCtx.createRadialGradient(cx - ballR * 0.35, ballY - dir * ballR * 0.35, 0.5, cx, ballY, ballR);
-    bGrad.addColorStop(0.0, '#ffffff');
-    bGrad.addColorStop(0.3, lightColor);
-    bGrad.addColorStop(0.7, mainColor);
-    bGrad.addColorStop(1.0, darkColor);
-    sCtx.fillStyle = bGrad;
-    sCtx.beginPath();
-    sCtx.arc(cx, ballY, ballR, 0, Math.PI * 2);
-    sCtx.fill();
-
-    // Small metallic studs on mace ball
-    sCtx.fillStyle = '#ffffff';
-    sCtx.beginPath();
-    sCtx.arc(cx, ballY + dir * ballR, 0.8, 0, Math.PI * 2);
-    sCtx.arc(cx - ballR, ballY, 0.8, 0, Math.PI * 2);
-    sCtx.arc(cx + ballR, ballY, 0.8, 0, Math.PI * 2);
-    sCtx.fill();
-
-    // Outlines
-    sCtx.strokeStyle = outlineColor;
-    sCtx.lineWidth = 1;
-    sCtx.beginPath();
-    sCtx.moveTo(cx - halfW, coneBaseY);
-    sCtx.lineTo(cx - ballR * 0.7, ballY);
-    sCtx.stroke();
-    sCtx.beginPath();
-    sCtx.moveTo(cx + halfW, coneBaseY);
-    sCtx.lineTo(cx + ballR * 0.7, ballY);
-    sCtx.stroke();
-    sCtx.beginPath();
-    sCtx.arc(cx, ballY, ballR, 0, Math.PI * 2);
-    sCtx.stroke();
-
-  } else if (family === 'bullet') {
-    // BULLET STUD (ratio 2.1 to 1, round tip, very glossy)
-    const midH = coneH * 0.45;
-    const midY = coneBaseY + dir * midH;
-    const domeR = halfW;
-
-    // Cylindrical lower section + rounded dome
-    const gBul = sCtx.createLinearGradient(cx - halfW, 0, cx + halfW, 0);
-    gBul.addColorStop(0.0, lightColor);
-    gBul.addColorStop(0.18, '#ffffff');
-    gBul.addColorStop(0.40, mainColor);
-    gBul.addColorStop(0.70, darkColor);
-    gBul.addColorStop(1.0, adjustColor(darkColor, -0.3));
-    sCtx.fillStyle = gBul;
-
-    sCtx.beginPath();
-    sCtx.moveTo(cx - halfW, coneBaseY);
-    sCtx.lineTo(cx - halfW, midY);
-    sCtx.arc(cx, midY, domeR, Math.PI, 0, isTop ? false : true);
-    sCtx.lineTo(cx + halfW, coneBaseY);
-    sCtx.closePath();
-    sCtx.fill();
-
-    // Super glossy highlight curve
-    sCtx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
-    sCtx.lineWidth = Math.max(1.2, w * 0.18);
-    sCtx.beginPath();
-    sCtx.moveTo(cx - halfW * 0.5, coneBaseY);
-    sCtx.lineTo(cx - halfW * 0.5, midY);
-    sCtx.quadraticCurveTo(cx - halfW * 0.4, tipY, cx - 1, tipY - dir * 1.5);
-    sCtx.stroke();
-
-    // Outline
-    sCtx.strokeStyle = outlineColor;
-    sCtx.lineWidth = 1;
-    sCtx.beginPath();
-    sCtx.moveTo(cx - halfW, coneBaseY);
-    sCtx.lineTo(cx - halfW, midY);
-    sCtx.arc(cx, midY, domeR, Math.PI, 0, isTop ? false : true);
-    sCtx.lineTo(cx + halfW, coneBaseY);
-    sCtx.stroke();
-
-  } else if (family === 'flame') {
-    // FLAME STUD (ratio 2.4 to 1, orange-red gradient cone with flame lick tip)
-    const gFlame = sCtx.createLinearGradient(0, coneBaseY, 0, tipY);
-    gFlame.addColorStop(0.0, '#b91c1c'); // Crimson red base
-    gFlame.addColorStop(0.5, '#f97316'); // Vibrant orange
-    gFlame.addColorStop(1.0, '#fef08a'); // Lick of yellow fire at tip
-    sCtx.fillStyle = gFlame;
-
-    sCtx.beginPath();
-    sCtx.moveTo(cx - halfW, coneBaseY);
-    sCtx.quadraticCurveTo(cx - halfW * 0.1, coneBaseY + dir * coneH * 0.6, cx + 1, tipY);
-    sCtx.quadraticCurveTo(cx + halfW * 0.2, coneBaseY + dir * coneH * 0.6, cx + halfW, coneBaseY);
-    sCtx.closePath();
-    sCtx.fill();
-
-    // Inner bright flame core
-    sCtx.fillStyle = 'rgba(254, 240, 138, 0.85)';
-    sCtx.beginPath();
-    sCtx.moveTo(cx - halfW * 0.35, coneBaseY + dir * 2);
-    sCtx.lineTo(cx, tipY - dir * 1.5);
-    sCtx.lineTo(cx + halfW * 0.2, coneBaseY + dir * 2);
-    sCtx.closePath();
-    sCtx.fill();
-
-    // Outline
-    sCtx.strokeStyle = '#450a0a';
-    sCtx.lineWidth = 1;
-    sCtx.beginPath();
-    sCtx.moveTo(cx - halfW, coneBaseY);
-    sCtx.quadraticCurveTo(cx - halfW * 0.1, coneBaseY + dir * coneH * 0.6, cx + 1, tipY);
-    sCtx.quadraticCurveTo(cx + halfW * 0.2, coneBaseY + dir * coneH * 0.6, cx + halfW, coneBaseY);
-    sCtx.stroke();
-
-  } else {
-    // CLASSIC (ratio 2.4 to 1, smooth cone bullet stud with 3D highlight)
-    const gL = sCtx.createLinearGradient(cx - halfW, 0, cx, 0);
-    gL.addColorStop(0, lightColor);
-    gL.addColorStop(1, mainColor);
-    sCtx.fillStyle = gL;
-    sCtx.beginPath();
-    sCtx.moveTo(cx - halfW, coneBaseY);
-    sCtx.lineTo(cx, tipY);
-    sCtx.lineTo(cx, coneBaseY);
-    sCtx.closePath();
-    sCtx.fill();
-
-    const gR = sCtx.createLinearGradient(cx, 0, cx + halfW, 0);
-    gR.addColorStop(0, mainColor);
-    gR.addColorStop(1, darkColor);
-    sCtx.fillStyle = gR;
-    sCtx.beginPath();
-    sCtx.moveTo(cx, coneBaseY);
-    sCtx.lineTo(cx, tipY);
-    sCtx.lineTo(cx + halfW, coneBaseY);
-    sCtx.closePath();
-    sCtx.fill();
-
-    // Bright white highlight stripe on left (~18% of width)
-    sCtx.strokeStyle = 'rgba(255, 255, 255, 0.92)';
-    sCtx.lineWidth = Math.max(1.1, w * 0.18);
-    sCtx.beginPath();
-    sCtx.moveTo(cx - halfW * 0.45, coneBaseY);
-    sCtx.lineTo(cx - 0.7, tipY - dir * 1.8);
-    sCtx.stroke();
-
-    // Exact cone outline
-    sCtx.strokeStyle = outlineColor;
-    sCtx.lineWidth = 1;
-    sCtx.beginPath();
-    sCtx.moveTo(cx - halfW, coneBaseY);
-    sCtx.lineTo(cx, tipY);
-    sCtx.lineTo(cx + halfW, coneBaseY);
-    sCtx.stroke();
-
-    // White specular glint at tip
-    sCtx.fillStyle = '#ffffff';
-    sCtx.beginPath();
-    sCtx.arc(cx - 0.4, tipY - dir * 1.2, 1.2, 0, Math.PI * 2);
-    sCtx.fill();
-  }
+  // Tiny specular dot near the tip
+  sCtx.fillStyle = "#ffffff";
+  sCtx.beginPath();
+  sCtx.arc(cx - 0.5, tipY - dir * 1.3, 1.2, 0, Math.PI * 2);
+  sCtx.fill();
 
   sCtx.restore();
 }
@@ -4194,41 +3805,41 @@ function playCoinPickupSound(coinType = 'bronze') {
 }
 
 function prerenderBoosterSprite() {
-  const sz = 64;
+  const sz = 80;
   const canvas = document.createElement('canvas');
   canvas.width = sz;
   canvas.height = sz;
   const bCtx = canvas.getContext('2d');
   const cx = sz / 2, cy = sz / 2;
-  const r = BOOSTER_RADIUS; // ~23.1px
+  const r = BOOSTER_RADIUS;
 
   // 1. Soft glowing outer radial gradient
-  const glow = bCtx.createRadialGradient(cx, cy, r * 0.25, cx, cy, r + 7);
+  const glow = bCtx.createRadialGradient(cx, cy, r * 0.25, cx, cy, sz / 2);
   glow.addColorStop(0, 'rgba(255, 255, 255, 0.95)');
-  glow.addColorStop(0.35, 'rgba(56, 189, 248, 0.75)');
-  glow.addColorStop(0.75, 'rgba(14, 165, 233, 0.30)');
+  glow.addColorStop(0.35, 'rgba(56, 189, 248, 0.85)');
+  glow.addColorStop(0.70, 'rgba(14, 165, 233, 0.35)');
   glow.addColorStop(1, 'rgba(2, 132, 199, 0)');
   bCtx.fillStyle = glow;
   bCtx.beginPath();
-  bCtx.arc(cx, cy, r + 7, 0, Math.PI * 2);
+  bCtx.arc(cx, cy, sz / 2, 0, Math.PI * 2);
   bCtx.fill();
 
   // 2. Translucent ring backing
-  bCtx.fillStyle = 'rgba(15, 23, 42, 0.78)';
+  bCtx.fillStyle = 'rgba(15, 23, 42, 0.88)';
   bCtx.beginPath();
   bCtx.arc(cx, cy, r, 0, Math.PI * 2);
   bCtx.fill();
 
   // 3. Bright cyan/white ring border
   bCtx.strokeStyle = '#38bdf8';
-  bCtx.lineWidth = 2.4;
+  bCtx.lineWidth = 2.6;
   bCtx.beginPath();
   bCtx.arc(cx, cy, r, 0, Math.PI * 2);
   bCtx.stroke();
 
-  // Inner accent ring
+  // Inner white accent ring
   bCtx.strokeStyle = '#ffffff';
-  bCtx.lineWidth = 1.0;
+  bCtx.lineWidth = 1.2;
   bCtx.beginPath();
   bCtx.arc(cx, cy, r - 3, 0, Math.PI * 2);
   bCtx.stroke();
@@ -4258,15 +3869,34 @@ function prerenderBoosterSprite() {
   bCtx.stroke();
   bCtx.restore();
 
+  // 5. Orbiting diamond sparkle stars
+  const starPoints = [
+    [cx - r * 0.9, cy - r * 0.65, 5],
+    [cx + r * 0.95, cy, 6],
+    [cx + r * 0.72, cy + r * 0.75, 5]
+  ];
+  for (const [sx, sy, ss] of starPoints) {
+    bCtx.fillStyle = '#bae6fd';
+    bCtx.beginPath();
+    bCtx.moveTo(sx, sy - ss);
+    bCtx.lineTo(sx + ss * 0.38, sy);
+    bCtx.lineTo(sx, sy + ss);
+    bCtx.lineTo(sx - ss * 0.38, sy);
+    bCtx.closePath();
+    bCtx.fill();
+  }
+
   boosterCanvas = canvas;
 }
 
 function drawBoosters() {
+  if (!boosterCanvas) prerenderBoosterSprite();
+
   for (let i = 0; i < boosters.length; i++) {
     const b = boosters[i];
     if (b.collected && b.popTimer <= 0) continue;
     const screenX = b.x - cam;
-    if (screenX < -50 || screenX > W + 50) continue;
+    if (screenX < -60 || screenX > W + 60) continue;
 
     const bobY = Math.sin(gameTime * 4.2 + b.phase) * 3.5;
     const pulse = 1.0 + 0.08 * Math.sin(gameTime * 6 + b.phase);
@@ -4288,9 +3918,19 @@ function drawBoosters() {
       ctx.save();
       ctx.translate(screenX, drawY);
       ctx.scale(pulse, pulse);
+
+      // Pulsing blue-white outer ring wave
+      const wavePhase = (gameTime * 2.8 + b.phase) % 1.0;
+      ctx.strokeStyle = 'rgba(56, 189, 248, ' + (0.75 * (1 - wavePhase)) + ')';
+      ctx.lineWidth = 2.0;
+      ctx.beginPath();
+      ctx.arc(0, 0, BOOSTER_RADIUS + wavePhase * 10, 0, Math.PI * 2);
+      ctx.stroke();
+
       if (boosterCanvas) {
         ctx.drawImage(boosterCanvas, -boosterCanvas.width / 2, -boosterCanvas.height / 2);
       }
+
       ctx.restore();
     }
   }
@@ -4585,93 +4225,129 @@ function generateLevelBoosters(lvl, segsList, coinsList) {
   boostRampFactor = 0;
   boostElapsed = 0;
 
-  const boostRng = mulberry32(hashInt(lvl * 99933 + 77719));
-  const roll = boostRng();
-  // A few levels have none, maximum BOOST_PER_LEVEL = 2 (never more than 3)
-  const targetCount = (roll < 0.20) ? 0 : ((roll < 0.70) ? 1 : Math.min(BOOST_PER_LEVEL, 2));
-  if (targetCount === 0 || !coinsList || coinsList.length < 5) return;
+  if (!coinsList || coinsList.length === 0) return;
 
-  const sp = scrollSpeed(0, true);
+  if (BOOSTER_TEST_START) {
+    // TEST MODE: Place one booster at start of every level on the first coin line right after take-off
+    const targetIdx = Math.min(3, coinsList.length - 1);
+    const targetCoin = coinsList[targetIdx];
+    boosters.push({
+      x: targetCoin.x,
+      y: targetCoin.y,
+      radius: BOOSTER_RADIUS,
+      collected: false,
+      phase: 0,
+      popTimer: 0
+    });
+    coinsList.splice(targetIdx, 1);
+    return;
+  }
+
+  // When BOOSTER_TEST_START is false:
+  // Place boosters from the level seed at the end of a coin pattern,
+  // never in the first 25% or last 20% of a level, in the safe band,
+  // never closer than 1.4 * carVis to any spike tip, at most 2 per level.
+  const boostRng = mulberry32(hashInt(lvl * 99933 + 77719));
   const minX = TUNNEL_START_X + TUNNEL_LENGTH * 0.25;
   const maxX = TUNNEL_START_X + TUNNEL_LENGTH * 0.80;
-  // Never place one where the boost would run into the finish road (with 2s stop before finish)
-  const finishSafetyDistance = (BOOST_DURATION * BOOST_SPEED + 2.5) * sp;
-  const hardMaxX = Math.min(maxX, TUNNEL_END_X - finishSafetyDistance);
-  const minSpacingX = 20.0 * sp;
+  const minSpikeDist = 1.4 * carVis; // 58.8 px
 
-  // Find ends of coin patterns
-  const candidateEndXs = [];
+  // Group coins into patterns by spacing
   const coinSpacing = 1.1 * 48;
+  const patternEnds = [];
+  let curGroup = [];
+
   for (let i = 0; i < coinsList.length; i++) {
     const c = coinsList[i];
-    const isPatternEnd = (i === coinsList.length - 1) || (coinsList[i + 1].x - c.x > coinSpacing * 1.8);
-    if (isPatternEnd) {
-      const candX = c.x + coinSpacing * 1.6;
-      if (candX >= minX && candX <= hardMaxX) {
-        candidateEndXs.push(candX);
+    if (curGroup.length === 0) {
+      curGroup.push(i);
+    } else {
+      const prevC = coinsList[curGroup[curGroup.length - 1]];
+      if (c.x - prevC.x <= coinSpacing * 1.9) {
+        curGroup.push(i);
+      } else {
+        if (curGroup.length >= 3) {
+          patternEnds.push(curGroup[curGroup.length - 1]);
+        }
+        curGroup = [i];
       }
     }
   }
-
-  // Deterministic shuffle using level seed
-  for (let i = candidateEndXs.length - 1; i > 0; i--) {
-    const j = Math.floor(boostRng() * (i + 1));
-    const temp = candidateEndXs[i];
-    candidateEndXs[i] = candidateEndXs[j];
-    candidateEndXs[j] = temp;
+  if (curGroup.length >= 3) {
+    patternEnds.push(curGroup[curGroup.length - 1]);
   }
 
-  // Place boosters strictly respecting safety constraints
-  for (let i = 0; i < candidateEndXs.length && boosters.length < targetCount; i++) {
-    const cx = candidateEndXs[i];
+  // Helper: check if (cx, cy) is closer than 1.4 * carVis to any spike tip
+  function isTooCloseToSpikes(cx, cy) {
+    for (let sIdx = 0; sIdx < segsList.length; sIdx++) {
+      const s = segsList[sIdx];
+      if (cx + minSpikeDist < s.x || cx - minSpikeDist > s.x + s.w) continue;
+      const count = s.topSpikes ? s.topSpikes.length : 0;
+      for (let i = 0; i < count; i++) {
+        const spX = s.x + i * 12 + 6;
+        if (Math.abs(cx - spX) > minSpikeDist) continue;
+        const spFrac = Math.max(0, Math.min(1, (spX - s.x) / s.w));
+        const curTop = s.isSlanted ? (s.top + (s.top2 - s.top) * spFrac) : (s.curTop != null ? s.curTop : s.top);
+        const curBot = s.isSlanted ? (s.bot + (s.bot2 - s.bot) * spFrac) : (s.curBot != null ? s.curBot : s.bot);
+        const topTip = (curTop - 18) + (s.topSpikes[i] ? s.topSpikes[i].h : 0);
+        const botTip = (curBot + 18) - (s.botSpikes[i] ? s.botSpikes[i].h : 0);
+        if (Math.hypot(cx - spX, cy - topTip) < minSpikeDist) return true;
+        if (Math.hypot(cx - spX, cy - botTip) < minSpikeDist) return true;
+      }
+    }
+    return false;
+  }
 
-    // At least 20 seconds apart
+  // Find valid pattern ends
+  const candidates = [];
+  for (const endIdx of patternEnds) {
+    const coin = coinsList[endIdx];
+    if (!coin || coin.x < minX || coin.x > maxX) continue;
+    const b = getCorridorSafeBounds(coin.x, segsList);
+    if (b.isSqueeze || b.halfH < 8) continue;
+    const candY = Math.max(b.safeTop + 8, Math.min(b.safeBot - 8, coin.y));
+    if (isTooCloseToSpikes(coin.x, candY)) continue;
+    candidates.push({ coinIndex: endIdx, x: coin.x, y: candY });
+  }
+
+  // Seeded shuffle of candidates
+  for (let i = candidates.length - 1; i > 0; i--) {
+    const j = Math.floor(boostRng() * (i + 1));
+    const tmp = candidates[i];
+    candidates[i] = candidates[j];
+    candidates[j] = tmp;
+  }
+
+  // Pick at most 2 boosters
+  const coinsToRemove = [];
+  const minBoosterSpacing = 1400;
+  for (const cand of candidates) {
+    if (boosters.length >= 2) break;
     let spaced = true;
-    for (let j = 0; j < boosters.length; j++) {
-      if (Math.abs(cx - boosters[j].x) < minSpacingX) {
+    for (const eb of boosters) {
+      if (Math.abs(eb.x - cand.x) < minBoosterSpacing) {
         spaced = false;
         break;
       }
     }
     if (!spaced) continue;
 
-    // Check safe band & ensure not in squeeze section
-    const b = getCorridorSafeBounds(cx, segsList);
-    if (b.isSqueeze) continue;
-    if (b.halfH < 1.4 * carVis) continue;
-
-    const candY = b.safeCenter;
-
-    // Spikes check: never closer than 1.4 * carVis to any spike tip
-    const safeTopLimit = b.top + 1.4 * carVis + 18;
-    const safeBotLimit = b.bot - 1.4 * carVis - 18;
-    if (candY < safeTopLimit || candY > safeBotLimit) continue;
-
-    // Hazards check: never closer than 1.4 * carVis to any hazard
-    let hazardSafe = true;
-    for (let k = 0; k < segsList.length; k++) {
-      const s = segsList[k];
-      if (s.obstacles && s.obstacles.length > 0) {
-        for (const obs of s.obstacles) {
-          const obsRadius = obs.radius || 20;
-          if (Math.hypot(cx - (obs.x || obs.anchorX || cx), candY - (obs.y || obs.anchorY || candY)) < obsRadius + 1.4 * carVis) {
-            hazardSafe = false;
-            break;
-          }
-        }
-      }
-      if (!hazardSafe) break;
-    }
-    if (!hazardSafe) continue;
-
     boosters.push({
-      x: cx,
-      y: candY,
+      x: cand.x,
+      y: cand.y,
       radius: BOOSTER_RADIUS,
       collected: false,
       phase: boostRng() * 6.28,
       popTimer: 0
     });
+    coinsToRemove.push(cand.coinIndex);
+  }
+
+  coinsToRemove.sort((a, b) => b - a);
+  for (const cIdx of coinsToRemove) {
+    if (cIdx >= 0 && cIdx < coinsList.length) {
+      coinsList.splice(cIdx, 1);
+    }
   }
 }
 
@@ -7863,6 +7539,7 @@ function drawVerticalRailConnector(x, y1, y2, cfg) {
 
 function drawSpike(x, baseY, isTop, sp, idx = 0, slope = 0) {
   if (!sp || !sp.h || sp.h <= 0) return;
+  if (x < -35 || x > W + 35) return; // Frustum culling: skip off-screen spikes
   const sizeKey = sp.size || (sp.h <= SPIKE_H_SMALL ? 'small' : (sp.h <= SPIKE_H_MEDIUM ? 'medium' : 'big'));
   const fam = sp.family || (curConfig && curConfig.families ? curConfig.families[0] : 'classic');
   const cIdx = sp.colorIdx || 0;
@@ -7874,44 +7551,18 @@ function drawSpike(x, baseY, isTop, sp, idx = 0, slope = 0) {
               Object.values(spikeCanvases)[0];
 
   if (spr) {
-    ctx.save();
-    // 6. DEPTH: Thin soft dark shadow of spikes on rail (shadowColor rgba(0, 0, 0, 0.45), blur 3)
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.45)';
-    ctx.shadowBlur = 3;
-    ctx.shadowOffsetY = isTop ? 1 : -1;
-
     if (slope !== 0) {
+      ctx.save();
       ctx.translate(x + 6, baseY);
       ctx.rotate(slope);
       ctx.drawImage(spr, -27, isTop ? -6 : -58);
+      ctx.restore();
     } else {
       if (isTop) {
         ctx.drawImage(spr, x + 6 - 27, baseY - 6);
       } else {
         ctx.drawImage(spr, x + 6 - 27, baseY - 58);
       }
-    }
-    ctx.restore();
-
-    // Soft tip glow pulsing slowly out of phase across the row
-    const pulse = 0.35 + 0.35 * Math.sin(gameTime * 2.5 + idx * 0.4);
-    if (pulse > 0.08) {
-      const glowColor = (curConfig && curConfig.glowColor) ? curConfig.glowColor : '#ff8a1f';
-      const tipY = baseY + (isTop ? sp.h : -sp.h);
-      const glowX = x + 6;
-      const glowR = Math.min(8, Math.max(4, sp.h * 0.22));
-
-      ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
-      const g = ctx.createRadialGradient(glowX, tipY, 0, glowX, tipY, glowR);
-      g.addColorStop(0, hexToRgba(glowColor, pulse));
-      g.addColorStop(0.5, hexToRgba(glowColor, pulse * 0.45));
-      g.addColorStop(1, 'rgba(0, 0, 0, 0)');
-      ctx.fillStyle = g;
-      ctx.beginPath();
-      ctx.arc(glowX, tipY, glowR, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
     }
   }
 }
@@ -8077,15 +7728,15 @@ function drawSportsWheel(cx, cy, r, angle) {
   ctx.restore(); // Restore wheel translation
 }
 
-// 1993 McLaren F1 supercar body with crisp outline & soft shadow
+// Sleek white supercar body with crisp outline & soft shadow
 function renderCarBody(drawWheelAngle = wheelRot) {
   ctx.fillStyle = '#0f172a';
   ctx.fillRect(-33, 6, 68, 4);
 
   const bodyGrad = ctx.createLinearGradient(0, -12, 0, 8);
-  bodyGrad.addColorStop(0, '#fef08a');
-  bodyGrad.addColorStop(0.45, '#facc15');
-  bodyGrad.addColorStop(1, '#eab308');
+  bodyGrad.addColorStop(0, '#ffffff');
+  bodyGrad.addColorStop(0.45, '#f1f5f9');
+  bodyGrad.addColorStop(1, '#cbd5e1');
   ctx.fillStyle = bodyGrad;
 
   ctx.beginPath();
@@ -8119,10 +7770,10 @@ function renderCarBody(drawWheelAngle = wheelRot) {
   ctx.beginPath();
   ctx.moveTo(8, -5); ctx.lineTo(-1, -8.5); ctx.lineTo(-14, -6); ctx.stroke();
 
-  ctx.fillStyle = '#ca8a04';
+  ctx.fillStyle = '#64748b';
   ctx.fillRect(-7, 2, 18, 3.5);
 
-  ctx.fillStyle = '#fef08a';
+  ctx.fillStyle = '#ffffff';
   ctx.beginPath(); ctx.arc(31, 1, 2.5, 0, 6.28); ctx.fill();
 
   ctx.fillStyle = '#ef4444';
@@ -8307,9 +7958,12 @@ function drawStageScene(stageNum, alpha = 1) {
     const unitW = pic.unitW;
     const scrollX = cam * 0.15;
     const relX = -((scrollX % unitW + unitW) % unitW);
-    ctx.drawImage(pic.seamlessCanvas, relX, 0);
-    if (relX + unitW < W) ctx.drawImage(pic.seamlessCanvas, relX + unitW, 0);
-    if (relX > 0) ctx.drawImage(pic.seamlessCanvas, relX - unitW, 0);
+    let drawX = relX;
+    while (drawX > 0) drawX -= unitW;
+    while (drawX < W) {
+      ctx.drawImage(pic.seamlessCanvas, drawX, 0);
+      drawX += unitW;
+    }
   } else if (bgData) {
     drawPreRenderedStage(bgData);
   } else {
@@ -8454,7 +8108,7 @@ function step(dt) {
     if (ft.timer <= 0) coinFloatTexts.splice(i, 1);
   }
 
-  // Booster timers & smooth ramp
+  // Booster timers & smooth ramp (ramps up in 0.35s, slows back in 0.5s)
   if (boostTimer > 0) {
     boostTimer = Math.max(0, boostTimer - dt);
     boostElapsed += dt;
@@ -8463,19 +8117,21 @@ function step(dt) {
     boostRampFactor = Math.min(rampUp, rampDown);
     if (boostTimer <= 0) {
       boostRampFactor = 0;
+      boostElapsed = 0;
     }
     boostProtectionTimer = 0.8;
   } else {
     boostRampFactor = 0;
+    boostElapsed = 0;
     if (boostProtectionTimer > 0) {
       boostProtectionTimer = Math.max(0, boostProtectionTimer - dt);
     }
   }
 
   // Safety: Stop any running boost 2 seconds before the finish road arrives
-  const distToFinish = TUNNEL_END_X - (cam + CAR_X);
+  const distToFinish = FINISH_ROAD_X - (cam + CAR_X);
   const timeToFinish = distToFinish / Math.max(1, sp);
-  if (timeToFinish <= 2.0 && boostTimer > 0) {
+  if (timeToFinish <= 2.0 && (boostTimer > 0 || boostRampFactor > 0)) {
     boostTimer = 0;
     boostRampFactor = 0;
     boostElapsed = 0;
@@ -8526,10 +8182,20 @@ function step(dt) {
     }
   }
 
-  // Booster collision detection during play
+  // Update collected coins pop animation
+  for (let i = 0; i < coins.length; i++) {
+    const c = coins[i];
+    if (c.collected && c.popTimer > 0) {
+      c.popTimer = Math.max(0, c.popTimer - dt);
+    }
+  }
+
+  // Coin and Booster collision detection during play
   if (st === 'play' && !stopping) {
     const carCX = cam + carDrawX;
     const carCY = cy;
+
+    // Booster pickup (pickup radius 0.95 * carVis, measured from car's center)
     for (let i = 0; i < boosters.length; i++) {
       const b = boosters[i];
       if (b.collected) continue;
@@ -8539,7 +8205,7 @@ function step(dt) {
       if (Math.hypot(dx, dy) <= BOOSTER_PICKUP_RADIUS) {
         b.collected = true;
         b.popTimer = 0.3;
-        // Collecting a second booster during a boost adds 2 seconds (maximum 6 seconds in total)
+        // Collecting a second booster during a boost adds 2 seconds (at most 6)
         if (boostTimer > 0) {
           boostTimer = Math.min(6.0, boostTimer + 2.0);
           boostMaxDuration = Math.max(boostMaxDuration, boostTimer);
@@ -8548,55 +8214,19 @@ function step(dt) {
           boostMaxDuration = BOOST_DURATION;
           boostElapsed = 0;
         }
-        boostProtectionTimer = 0.8;
         playBoostWhooshSound();
-        triggerVibrate([40, 20, 60]);
-
-        const curStg = getStage(curLevel);
         coinFloatTexts.push({
           text: 'BOOST!',
           x: carDrawX,
           y: cy - 28,
           timer: 0.9,
-          color: (curStg && curStg.accent) ? curStg.accent : '#38bdf8'
+          color: '#38bdf8'
         });
-
-        for (let k = 0; k < 12; k++) {
+        for (let k = 0; k < 14; k++) {
           spawnBoosterSparkle(b.x, b.y, true);
         }
       }
     }
-
-    // Coin Magnet Pull during boost: coins within 3.5 * carVis are pulled to the car
-    if (boostRampFactor > 0.05) {
-      const magnetRadius = 3.5 * carVis; // ~147px
-      for (let i = 0; i < coins.length; i++) {
-        const c = coins[i];
-        if (c.collected) continue;
-        const dx = carCX - c.x;
-        const dy = carCY - c.y;
-        const dist = Math.hypot(dx, dy);
-        if (dist <= magnetRadius && dist > 1) {
-          const pullSpeed = Math.min(dist, (magnetRadius / dist) * 360 * dt);
-          c.x += (dx / dist) * pullSpeed;
-          c.y += (dy / dist) * pullSpeed;
-        }
-      }
-    }
-  }
-
-  // Update collected coins pop animation
-  for (let i = 0; i < coins.length; i++) {
-    const c = coins[i];
-    if (c.collected && c.popTimer > 0) {
-      c.popTimer = Math.max(0, c.popTimer - dt);
-    }
-  }
-
-  // Coin collision detection during play
-  if (st === 'play' && !stopping) {
-    const carCX = cam + carDrawX;
-    const carCY = cy;
 
     for (let i = 0; i < coins.length; i++) {
       const c = coins[i];
@@ -8911,7 +8541,7 @@ function step(dt) {
     }
 
     // Jet thrusters and flames (replaces white smoke puffs)
-    const isThrustFlying = (hold && isCarInAir && st === 'play' && !autoLanding && !stopping);
+    const isThrustFlying = ((hold || (boostRampFactor > 0.05)) && isCarInAir && st === 'play' && !autoLanding && !stopping);
     if (isThrustFlying) {
       podDeploy = Math.min(1.0, podDeploy + dt / POD_SLIDE_TIME);
       flameIntensity = Math.min(1.0, flameIntensity + dt / 0.12);
@@ -9155,8 +8785,15 @@ function step(dt) {
 
   updateThrustAudio(dt);
 
-  for (const p of parts) { p.l += dt; p.x += p.vx * dt; p.y += p.vy * dt; }
-  parts = parts.filter(p => p.l < p.m);
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const p = parts[i];
+    p.l += dt;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    if (p.l >= p.m) {
+      parts.splice(i, 1);
+    }
+  }
 }
 
 function drawLoadingScreen() {
@@ -9327,12 +8964,12 @@ function drawLoadingScreen() {
   roundRect(ctx, barX, barY, barW, barH, barH / 2);
   ctx.stroke();
 
-  // Progress follows real loading progress with car matching yellow-to-orange gradient
+  // Progress follows real loading progress with clean modern gradient
   const fillW = Math.max(barH, barW * visualLoadProgress);
   const fillGrad = ctx.createLinearGradient(0, barY, 0, barY + barH);
-  fillGrad.addColorStop(0, '#fef08a');
-  fillGrad.addColorStop(0.45, '#facc15');
-  fillGrad.addColorStop(1, '#ea580c');
+  fillGrad.addColorStop(0, '#ffffff');
+  fillGrad.addColorStop(0.45, '#38bdf8');
+  fillGrad.addColorStop(1, '#0284c7');
   ctx.fillStyle = fillGrad;
   roundRect(ctx, barX, barY, fillW, barH, barH / 2);
   ctx.fill();
@@ -9408,14 +9045,16 @@ function drawHUD() {
     drawGlossyText(`+${levelCoinsCollected}`, coinPillX - 6, coinPillY + coinPillH / 2 + 1, 13, 'right', '#fde047', '#713f12', 3.0);
   }
 
-  // Requirement 6: "x2" badge next to coin counter during boost
+  // Small "x2" next to the coin counter while boosting
   if (boostTimer > 0) {
-    const x2X = coinPillX - (levelCoinsCollected > 0 ? 38 : 10);
+    const levelCoinsStr = (levelCoinsCollected > 0) ? `+${levelCoinsCollected}` : '';
+    const levelCoinsWidth = levelCoinsStr ? (levelCoinsStr.length * 8 + 10) : 0;
+    const x2X = coinPillX - 8 - levelCoinsWidth;
     const x2Y = coinPillY + coinPillH / 2 + 1;
     drawGlossyText('x2', x2X, x2Y, 13, 'right', '#38bdf8', '#0f172a', 3.2);
   }
 
-  // Requirement 5: Glowing bolt icon with a shrinking timer bar under the coin counter
+  // Glowing bolt icon with a shrinking timer bar under the coin counter
   if (boostTimer > 0) {
     const bHudX = coinPillX;
     const bHudY = coinPillY + coinPillH + 4;
@@ -9437,6 +9076,9 @@ function drawHUD() {
     ctx.shadowColor = 'transparent';
 
     // Glowing bolt icon
+    ctx.save();
+    ctx.shadowColor = '#38bdf8';
+    ctx.shadowBlur = 6;
     const boltCX = bHudX + 9;
     const boltCY = bHudY + bHudH / 2;
     ctx.fillStyle = '#fef08a';
@@ -9449,6 +9091,7 @@ function drawHUD() {
     ctx.lineTo(boltCX + 0.5, boltCY - 0.5);
     ctx.closePath();
     ctx.fill();
+    ctx.restore();
 
     // Shrinking progress bar
     const barX = bHudX + 18;
@@ -9906,17 +9549,8 @@ function drawGameContent(dt = 0.016) {
     ctx.translate(shakeX, shakeY);
   }
 
-  // 1. Picture background (or fallback procedural) with soft blur during boost
-  if (boostRampFactor > 0.1) {
-    ctx.save();
-    try {
-      ctx.filter = 'blur(' + Math.round(boostRampFactor * 2) + 'px)';
-    } catch (e) {}
-    drawBackground();
-    ctx.restore();
-  } else {
-    drawBackground();
-  }
+  // 1. Picture background (or fallback procedural)
+  drawBackground();
 
   // 2. Wheel thruster smoke (behind road and car; never drawn on top of road or truss)
   const sRoadX1 = START_ROAD_START - cam - 20;
@@ -9963,6 +9597,7 @@ function drawGameContent(dt = 0.016) {
   for (let i = 0; i < segs.length; i++) {
     const s = segs[i];
     const x = s.x - cam;
+    if (x + s.w < -60 || x > W + 60) continue;
     if (!s.isOpen) drawWall(s, x);
     if (s.obstacles) drawObstacles(s, x, cfg);
 
